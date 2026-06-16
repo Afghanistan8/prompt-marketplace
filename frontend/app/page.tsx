@@ -18,7 +18,6 @@ export default function Home() {
               GenLayer
             </span>
           </div>
-<span className="text-xs text-yellow-300 mr-3">REG: {process.env.NEXT_PUBLIC_REGISTRY_ADDRESS || 'NOT_SET'}</span>
           <ConnectButton />
         </div>
       </header>
