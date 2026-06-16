@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Sparkles, ShieldCheck, Search } from 'lucide-react';
 import { Marketplace } from '../components/Marketplace';
@@ -18,7 +19,7 @@ export default function Home() {
               GenLayer
             </span>
           </div>
-          <ConnectButton />
+          <div className="flex items-center gap-4"><Link href="/how-it-works" className="text-sm text-zinc-400 transition hover:text-zinc-200">How it works</Link><ConnectButton /></div>
         </div>
       </header>
 
