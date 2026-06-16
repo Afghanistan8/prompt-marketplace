@@ -19,7 +19,7 @@ export const bradburyChain = defineChain({
 
 export const wagmiConfig = getDefaultConfig({
   appName: 'Prompt Market',
-  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '',
+  projectId: projectId: '3202b98cd356ef0b16b42298ca85ebd0',
   chains: [bradburyChain],
   transports: {
     [bradburyChain.id]: http('https://rpc-bradbury.genlayer.com/'),
