@@ -1,8 +1,10 @@
 'use client';
 
-import { http, createConfig } from 'wagmi';
+import { http } from 'wagmi';
 import { defineChain } from 'viem';
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
+
+// ---------- Chain config (public, hardcoded for build-time safety) ----------
 
 export const bradburyChain = defineChain({
   id: 4221,
@@ -17,9 +19,18 @@ export const bradburyChain = defineChain({
   testnet: true,
 });
 
+// ---------- Wagmi + RainbowKit config ----------
+// WalletConnect projectId is hardcoded because:
+//   1. It's public — it gets inlined into the browser bundle anyway
+//   2. Hardcoding avoids RainbowKit's strict projectId check failing during
+//      Next.js prerendering of /_not-found (RainbowKit issue #2260)
+// Contract addresses are hardcoded for the same reason — they're on-chain
+// and publicly known, and keeping them out of env vars makes Vercel
+// deployments more reliable.
+
 export const wagmiConfig = getDefaultConfig({
   appName: 'Prompt Market',
-  projectId: projectId: '3202b98cd356ef0b16b42298ca85ebd0',
+  projectId: '3202b98cd356ef0b16b42298ca85ebd0',
   chains: [bradburyChain],
   transports: {
     [bradburyChain.id]: http('https://rpc-bradbury.genlayer.com/'),
@@ -27,7 +38,7 @@ export const wagmiConfig = getDefaultConfig({
   ssr: true,
 });
 
-export const REGISTRY_ADDRESS = (process.env.NEXT_PUBLIC_REGISTRY_ADDRESS ||
-  '') as `0x${string}`;
-export const ESCROW_ADDRESS = (process.env.NEXT_PUBLIC_ESCROW_ADDRESS ||
-  '') as `0x${string}`;
+// ---------- Contract addresses ----------
+
+export const REGISTRY_ADDRESS = '0xDcb0c7210B520379C91Ea97967DB920984bf3Ac1' as `0x${string}`;
+export const ESCROW_ADDRESS = '0xc3DfF0Ed88A8912d992D96bb4b6e44383bF90431' as `0x${string}`;
