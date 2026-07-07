@@ -41,4 +41,4 @@ export const wagmiConfig = getDefaultConfig({
 // ---------- Contract addresses ----------
 
 export const REGISTRY_ADDRESS = '0xDcb0c7210B520379C91Ea97967DB920984bf3Ac1' as `0x${string}`;
-export const ESCROW_ADDRESS = '0xc3DfF0Ed88A8912d992D96bb4b6e44383bF90431' as `0x${string}`;
+export const ESCROW_ADDRESS = '0xa6644845B1a136e9CfB48e05C16bcb684D6C93B0' as `0x${string}`;

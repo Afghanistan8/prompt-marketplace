@@ -21,10 +21,59 @@ interface Props {
   onSuccess: () => void;
 }
 
+// Translate raw GenLayer errors into human-readable feedback.
+function humanizeError(raw: string): { message: string; hint: string | null } {
+  const s = raw.toLowerCase();
+  if (s.includes('already purchased')) {
+    return {
+      message: 'You already own this prompt.',
+      hint: 'Check "My Library" from the header to view it.',
+    };
+  }
+  if (s.includes('undetermined')) {
+    return {
+      message: 'Validators could not reach consensus.',
+      hint: "Bradbury testnet occasionally hits this. Wait a minute and try again.",
+    };
+  }
+  if (s.includes('validators_timeout') || s.includes('validators timeout')) {
+    return {
+      message: 'Validators timed out reaching consensus.',
+      hint: 'This is a Bradbury Phase 1 testnet limitation. The auto-appeal will retry in ~30 min, or you can try a fresh purchase.',
+    };
+  }
+  if (s.includes('timed out waiting')) {
+    return {
+      message: 'The transaction is taking longer than expected.',
+      hint: 'It may still succeed. Check the transaction link, and refresh the marketplace after a minute.',
+    };
+  }
+  if (s.includes('user rejected') || s.includes('user denied')) {
+    return {
+      message: 'You cancelled the transaction in your wallet.',
+      hint: null,
+    };
+  }
+  if (s.includes('insufficient funds') || s.includes('insufficient balance')) {
+    return {
+      message: 'Not enough GEN to complete this purchase.',
+      hint: 'You need the listing price plus a small amount for gas.',
+    };
+  }
+  if (s.includes('attached value does not match')) {
+    return {
+      message: 'Payment amount did not match the listing price.',
+      hint: 'Refresh the page and try again — the listing may have been updated.',
+    };
+  }
+  return { message: raw, hint: null };
+}
+
 export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
   const { address, isConnected } = useAccount();
   const [stage, setStage] = useState<Stage>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorHint, setErrorHint] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
 
   if (!open || !listing) return null;
@@ -32,12 +81,14 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
   function reset() {
     setStage('idle');
     setErrorMsg(null);
+    setErrorHint(null);
     setTxHash(null);
   }
 
   async function handleBuy() {
     if (!listing) return;
     setErrorMsg(null);
+    setErrorHint(null);
 
     if (!isConnected || !address) {
       setErrorMsg('Connect your wallet first.');
@@ -70,13 +121,15 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
     } catch (e) {
       console.error('[Buy] error:', e);
       setStage('error');
-      const msg =
+      const raw =
         e instanceof Error
           ? e.message
           : typeof e === 'object'
-          ? JSON.stringify(e, null, 2)
+          ? JSON.stringify(e)
           : String(e);
-      setErrorMsg(msg);
+      const { message, hint } = humanizeError(raw);
+      setErrorMsg(message);
+      setErrorHint(hint);
     }
   }
 
@@ -94,7 +147,7 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
             onClick={() => {
               if (isSubmitting) return;
               onClose();
-              if (stage === 'success') reset();
+              if (stage === 'success' || stage === 'error') reset();
             }}
             disabled={isSubmitting}
             className="rounded-md p-1 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 disabled:opacity-50"
@@ -131,14 +184,19 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
               </div>
 
               <p className="mt-4 text-xs text-zinc-500">
-                The seller receives {formatGen((listing.price_wei * 9750n) / 10000n)} GEN immediately.
-                Platform fee: 2.5%.
+                The seller receives {formatGen((listing.price_wei * 9750n) / 10000n)} GEN
+                immediately. Platform fee: 2.5%.
               </p>
 
               {errorMsg && (
-                <div className="mt-4 flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span className="break-all">{errorMsg}</span>
+                <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm">
+                  <div className="flex items-start gap-2 text-red-300">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span className="break-words">{errorMsg}</span>
+                  </div>
+                  {errorHint && (
+                    <p className="mt-2 pl-6 text-xs text-red-400/80">{errorHint}</p>
+                  )}
                 </div>
               )}
 
@@ -147,7 +205,7 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>
                     {stage === 'signing' && 'Approve the transaction in your wallet…'}
-                    {stage === 'waiting' && 'Submitting purchase on Bradbury (~30–90s)…'}
+                    {stage === 'waiting' && 'Submitting purchase on Bradbury (~30-90s)…'}
                   </span>
                 </div>
               )}
@@ -194,7 +252,7 @@ function SuccessView({ txHash, onDone }: { txHash: string | null; onDone: () => 
       <CheckCircle2 className="mx-auto h-10 w-10 text-green-400" />
       <h3 className="mt-3 text-base font-medium">Purchase complete</h3>
       <p className="mt-1 text-sm text-zinc-400">
-        Seller paid, sale recorded on-chain.
+        Seller paid, sale recorded on-chain. Check "My Library" to view your new prompt.
       </p>
       {txHash && (
         <a

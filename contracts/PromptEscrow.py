@@ -40,6 +40,15 @@ class PromptEscrow(gl.Contract):
         buyer = gl.message.sender_address
         if buyer == seller:
             raise gl.vm.UserError("seller cannot buy own listing")
+            
+        last = int(self.next_purchase_id) - 1
+        i = 1
+        while i <= last:
+            pid = u256(i)
+            if pid in self.exists_of:
+                if self.buyer_of[pid] == buyer and self.prompt_id_of[pid] == prompt_id:
+                    raise gl.vm.UserError("already purchased this listing")
+            i = i + 1
 
         purchase_id = self.next_purchase_id
 

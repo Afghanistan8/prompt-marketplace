@@ -19,6 +19,48 @@ interface Props {
   onSuccess: () => void;
 }
 
+// Same humanization strategy as BuyConfirmModal — surface friendly errors.
+function humanizeError(raw: string): { message: string; hint: string | null } {
+  const s = raw.toLowerCase();
+  if (s.includes('duplicate')) {
+    return {
+      message: 'This prompt was flagged as a duplicate of an existing listing.',
+      hint: 'Validators judged it too similar to another prompt. Try distinguishing it further and resubmit.',
+    };
+  }
+  if (s.includes('undetermined')) {
+    return {
+      message: 'Validators could not agree on how to categorize this prompt.',
+      hint: 'Try adding more specific technical detail to the description so the classification is unambiguous, then resubmit.',
+    };
+  }
+  if (s.includes('validators_timeout') || s.includes('validators timeout')) {
+    return {
+      message: 'Validators timed out reaching consensus.',
+      hint: 'Bradbury Phase 1 testnet occasionally hits this. The auto-appeal will retry in ~30 min, or you can try again fresh.',
+    };
+  }
+  if (s.includes('timed out waiting')) {
+    return {
+      message: 'The transaction is taking longer than expected.',
+      hint: 'It may still succeed. Check the transaction link and refresh the marketplace after a minute.',
+    };
+  }
+  if (s.includes('user rejected') || s.includes('user denied')) {
+    return {
+      message: 'You cancelled the transaction in your wallet.',
+      hint: null,
+    };
+  }
+  if (s.includes('insufficient funds') || s.includes('insufficient balance')) {
+    return {
+      message: 'Not enough GEN to cover gas.',
+      hint: null,
+    };
+  }
+  return { message: raw, hint: null };
+}
+
 export function ListPromptModal({ open, onClose, onSuccess }: Props) {
   const { address, isConnected } = useAccount();
 
@@ -31,6 +73,7 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
 
   const [stage, setStage] = useState<Stage>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorHint, setErrorHint] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
 
   if (!open) return null;
@@ -44,11 +87,13 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
     setPreview('');
     setStage('idle');
     setErrorMsg(null);
+    setErrorHint(null);
     setTxHash(null);
   }
 
   async function handleSubmit() {
     setErrorMsg(null);
+    setErrorHint(null);
 
     if (!isConnected || !address) {
       setErrorMsg('Connect your wallet first.');
@@ -93,13 +138,15 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
     } catch (e) {
       console.error('[List] submit error:', e);
       setStage('error');
-      const msg =
+      const raw =
         e instanceof Error
           ? e.message
           : typeof e === 'object'
-          ? JSON.stringify(e, null, 2)
+          ? JSON.stringify(e)
           : String(e);
-      setErrorMsg(msg);
+      const { message, hint } = humanizeError(raw);
+      setErrorMsg(message);
+      setErrorHint(hint);
     }
   }
 
@@ -117,7 +164,7 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
             onClick={() => {
               if (isSubmitting) return;
               onClose();
-              if (stage === 'success') reset();
+              if (stage === 'success' || stage === 'error') reset();
             }}
             className="rounded-md p-1 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 disabled:opacity-50"
             disabled={isSubmitting}
@@ -132,26 +179,25 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
             <SuccessView txHash={txHash} onDone={() => { onClose(); reset(); }} />
           ) : (
             <Form
-              title={title}
-              setTitle={setTitle}
-              description={description}
-              setDescription={setDescription}
-              body={body}
-              setBody={setBody}
-              targetModels={targetModels}
-              setTargetModels={setTargetModels}
-              priceGen={priceGen}
-              setPriceGen={setPriceGen}
-              preview={preview}
-              setPreview={setPreview}
+              title={title} setTitle={setTitle}
+              description={description} setDescription={setDescription}
+              body={body} setBody={setBody}
+              targetModels={targetModels} setTargetModels={setTargetModels}
+              priceGen={priceGen} setPriceGen={setPriceGen}
+              preview={preview} setPreview={setPreview}
               disabled={isSubmitting}
             />
           )}
 
           {errorMsg && stage !== 'success' && (
-            <div className="mt-4 flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{errorMsg}</span>
+            <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm">
+              <div className="flex items-start gap-2 text-red-300">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span className="break-words">{errorMsg}</span>
+              </div>
+              {errorHint && (
+                <p className="mt-2 pl-6 text-xs text-red-400/80">{errorHint}</p>
+              )}
             </div>
           )}
 
@@ -162,7 +208,7 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
                 {stage === 'preparing' && 'Hashing prompt body…'}
                 {stage === 'signing' && 'Approve the transaction in your wallet…'}
                 {stage === 'waiting' &&
-                  'Waiting for validator consensus. LLM categorization + duplicate check (~30–90s)…'}
+                  'Waiting for validator consensus. LLM categorization + duplicate check (~30-90s)…'}
               </span>
             </div>
           )}
@@ -193,18 +239,12 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
 }
 
 interface FormProps {
-  title: string;
-  setTitle: (s: string) => void;
-  description: string;
-  setDescription: (s: string) => void;
-  body: string;
-  setBody: (s: string) => void;
-  targetModels: string;
-  setTargetModels: (s: string) => void;
-  priceGen: string;
-  setPriceGen: (s: string) => void;
-  preview: string;
-  setPreview: (s: string) => void;
+  title: string; setTitle: (s: string) => void;
+  description: string; setDescription: (s: string) => void;
+  body: string; setBody: (s: string) => void;
+  targetModels: string; setTargetModels: (s: string) => void;
+  priceGen: string; setPriceGen: (s: string) => void;
+  preview: string; setPreview: (s: string) => void;
   disabled: boolean;
 }
 
@@ -212,85 +252,38 @@ function Form(p: FormProps) {
   return (
     <div className="space-y-4">
       <Field label="Title" hint="Short, descriptive name (4–120 chars)">
-        <input
-          value={p.title}
-          onChange={(e) => p.setTitle(e.target.value)}
-          disabled={p.disabled}
-          placeholder="e.g. Strict JSON Extractor for Invoices"
-          className={inputCls}
-        />
+        <input value={p.title} onChange={(e) => p.setTitle(e.target.value)} disabled={p.disabled}
+          placeholder="e.g. Strict JSON Extractor for Invoices" className={inputCls} />
       </Field>
-
       <Field label="Description" hint="What does this prompt do? (20–2000 chars)">
-        <textarea
-          value={p.description}
-          onChange={(e) => p.setDescription(e.target.value)}
-          disabled={p.disabled}
+        <textarea value={p.description} onChange={(e) => p.setDescription(e.target.value)} disabled={p.disabled}
           rows={3}
           placeholder="Explain what the prompt does, its input format, and its output format. Validators use this to categorize and check for duplicates."
-          className={inputCls}
-        />
+          className={inputCls} />
       </Field>
-
       <Field label="Prompt body" hint="The actual prompt text. Hashed on submit; full body stays off-chain for v1.">
-        <textarea
-          value={p.body}
-          onChange={(e) => p.setBody(e.target.value)}
-          disabled={p.disabled}
-          rows={5}
-          placeholder="You are an assistant that..."
-          className={`${inputCls} font-mono text-xs`}
-        />
+        <textarea value={p.body} onChange={(e) => p.setBody(e.target.value)} disabled={p.disabled}
+          rows={5} placeholder="You are an assistant that..." className={`${inputCls} font-mono text-xs`} />
       </Field>
-
       <Field label="Preview" hint="Optional. Public teaser shown before purchase. Defaults to first 200 chars of body.">
-        <textarea
-          value={p.preview}
-          onChange={(e) => p.setPreview(e.target.value)}
-          disabled={p.disabled}
-          rows={2}
-          placeholder="(optional)"
-          className={inputCls}
-        />
+        <textarea value={p.preview} onChange={(e) => p.setPreview(e.target.value)} disabled={p.disabled}
+          rows={2} placeholder="(optional)" className={inputCls} />
       </Field>
-
       <div className="grid grid-cols-2 gap-4">
         <Field label="Target models" hint="Comma-separated">
-          <input
-            value={p.targetModels}
-            onChange={(e) => p.setTargetModels(e.target.value)}
-            disabled={p.disabled}
-            placeholder="gpt-4,claude-opus-4"
-            className={inputCls}
-          />
+          <input value={p.targetModels} onChange={(e) => p.setTargetModels(e.target.value)}
+            disabled={p.disabled} placeholder="gpt-4,claude-opus-4" className={inputCls} />
         </Field>
-
         <Field label="Price (GEN)" hint="Per purchase">
-          <input
-            value={p.priceGen}
-            onChange={(e) => p.setPriceGen(e.target.value)}
-            disabled={p.disabled}
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="1"
-            className={inputCls}
-          />
+          <input value={p.priceGen} onChange={(e) => p.setPriceGen(e.target.value)} disabled={p.disabled}
+            type="number" min="0" step="0.01" placeholder="1" className={inputCls} />
         </Field>
       </div>
     </div>
   );
 }
 
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
       <label className="mb-1 block text-xs font-medium text-zinc-300">{label}</label>
@@ -313,20 +306,15 @@ function SuccessView({ txHash, onDone }: { txHash: string | null; onDone: () => 
         categorized — or whether it was caught as a duplicate.
       </p>
       {txHash && (
-        <a
-          href={`https://explorer-bradbury.genlayer.com/tx/${txHash}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-3 inline-block text-xs text-purple-400 hover:text-purple-300"
-        >
+        <a href={`https://explorer-bradbury.genlayer.com/tx/${txHash}`}
+          target="_blank" rel="noopener noreferrer"
+          className="mt-3 inline-block text-xs text-purple-400 hover:text-purple-300">
           View transaction →
         </a>
       )}
       <div className="mt-5">
-        <button
-          onClick={onDone}
-          className="rounded-md bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-400"
-        >
+        <button onClick={onDone}
+          className="rounded-md bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-400">
           Done
         </button>
       </div>

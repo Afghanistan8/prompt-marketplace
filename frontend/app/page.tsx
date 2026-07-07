@@ -19,7 +19,7 @@ export default function Home() {
               GenLayer
             </span>
           </div>
-          <div className="flex items-center gap-4"><Link href="/how-it-works" className="text-sm text-zinc-400 transition hover:text-zinc-200">How it works</Link><ConnectButton /></div>
+          <div className="flex items-center gap-4"><Link href="/how-it-works" className="text-sm text-zinc-400 transition hover:text-zinc-200">How it works</Link><Link href="/library" className="text-sm text-zinc-400 transition hover:text-zinc-200">My library</Link><ConnectButton /></div>
         </div>
       </header>
 
