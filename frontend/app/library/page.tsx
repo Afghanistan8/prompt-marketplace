@@ -7,6 +7,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import {
   getBuyerPurchases,
   getListing,
+  getPurchasedBody,
   formatGen,
   shortAddress,
   invalidateCache,
@@ -18,7 +19,9 @@ import {
   Loader2,
   RefreshCw,
   Tag,
-  ExternalLink,
+  Copy,
+  Check,
+  Lock,
 } from 'lucide-react';
 
 export default function Library() {
@@ -52,6 +55,7 @@ export default function Library() {
   function refresh() {
     invalidateCache('buyer_purchases');
     invalidateCache('listing:');
+    invalidateCache('purchased_body:');
     load();
   }
 
@@ -79,7 +83,7 @@ export default function Library() {
                 <h1 className="text-2xl font-semibold">My Library</h1>
               </div>
               <p className="text-sm text-zinc-500">
-                Prompts you've purchased. On-chain receipts, verifiable forever.
+                Prompts you own. Content is delivered from the Registry contract, gated by your on-chain purchase receipt.
               </p>
             </div>
             {isConnected && (
@@ -95,8 +99,8 @@ export default function Library() {
 
           {!isConnected && (
             <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-12 text-center">
-              <BookOpen className="mx-auto mb-3 h-10 w-10 text-zinc-600" />
-              <h3 className="mb-2 font-medium">Connect a wallet to view your library</h3>
+              <Lock className="mx-auto mb-3 h-10 w-10 text-zinc-600" />
+              <h3 className="mb-2 font-medium">Connect a wallet to unlock your library</h3>
               <p className="mb-6 text-sm text-zinc-500">
                 Your purchases live on-chain. Connect the wallet you bought with to see them.
               </p>
@@ -109,13 +113,13 @@ export default function Library() {
           {isConnected && loading && (
             <div className="flex items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/30 p-12 text-zinc-400">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading your purchases…
+              Loading your purchases...
             </div>
           )}
 
           {isConnected && error && !loading && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-6 text-sm text-red-300">
-              <p className="font-medium">Couldn't load your library</p>
+              <p className="font-medium">Could not load your library</p>
               <p className="mt-1 text-red-400/80">{error}</p>
             </div>
           )}
@@ -136,9 +140,13 @@ export default function Library() {
           )}
 
           {isConnected && !loading && !error && purchases.length > 0 && (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4">
               {purchases.map((listing) => (
-                <PurchaseCard key={listing.id?.toString()} listing={listing} />
+                <PurchaseCard
+                  key={listing.id?.toString()}
+                  listing={listing}
+                  account={address as `0x${string}`}
+                />
               ))}
             </div>
           )}
@@ -148,23 +156,64 @@ export default function Library() {
   );
 }
 
-function PurchaseCard({ listing }: { listing: Listing }) {
+function PurchaseCard({ listing, account }: { listing: Listing; account: `0x${string}` }) {
   const tags = listing.tags_csv ? listing.tags_csv.split(',').filter(Boolean) : [];
+  const [body, setBody] = useState<string | null>(null);
+  const [bodyLoading, setBodyLoading] = useState(true);
+  const [bodyError, setBodyError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!listing.id) return;
+    let cancelled = false;
+    setBodyLoading(true);
+    setBodyError(null);
+    getPurchasedBody(listing.id, account)
+      .then((b) => {
+        if (!cancelled) setBody(b);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          const raw = e instanceof Error ? e.message : String(e);
+          setBodyError(
+            /not authorized/i.test(raw)
+              ? 'This wallet is not authorized to view this prompt. Reconnect the wallet you purchased with.'
+              : 'Could not load the prompt body. Try refreshing in a moment.'
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBodyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [listing.id, account]);
+
+  async function handleCopy() {
+    if (!body) return;
+    try {
+      await navigator.clipboard.writeText(body);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignore
+    }
+  }
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
       <div className="mb-3 flex items-start justify-between gap-2">
-        <h3 className="font-medium leading-snug">{listing.title}</h3>
+        <div>
+          <h3 className="font-medium leading-snug">{listing.title}</h3>
+          {listing.description && (
+            <p className="mt-1 text-sm leading-relaxed text-zinc-400">{listing.description}</p>
+          )}
+        </div>
         <span className="shrink-0 rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-purple-300">
           {listing.category}
         </span>
       </div>
-
-      {listing.description && (
-        <p className="mb-3 text-sm leading-relaxed text-zinc-400">
-          {listing.description}
-        </p>
-      )}
 
       {tags.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-1">
@@ -180,11 +229,48 @@ function PurchaseCard({ listing }: { listing: Listing }) {
         </div>
       )}
 
-      <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
-        <p className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">Preview</p>
-        <p className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-zinc-300">
-          {listing.preview || '(no preview available)'}
-        </p>
+      <div className="rounded-md border border-purple-500/30 bg-purple-500/5 p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[10px] uppercase tracking-wide text-purple-300">
+            Your prompt (unlocked)
+          </p>
+          {body && !bodyLoading && !bodyError && (
+            <button
+              onClick={handleCopy}
+              className="inline-flex items-center gap-1 rounded border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-[10px] text-purple-200 transition hover:bg-purple-500/20"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-3 w-3" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3 w-3" />
+                  Copy
+                </>
+              )}
+            </button>
+          )}
+        </div>
+
+        {bodyLoading && (
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Fetching body from Registry contract...
+          </div>
+        )}
+        {bodyError && !bodyLoading && (
+          <p className="text-xs text-red-400">{bodyError}</p>
+        )}
+        {!bodyLoading && !bodyError && body && (
+          <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-zinc-200">
+            {body}
+          </pre>
+        )}
+        {!bodyLoading && !bodyError && !body && (
+          <p className="text-xs text-zinc-500">(empty body)</p>
+        )}
       </div>
 
       <div className="mt-3 flex items-center justify-between border-t border-zinc-800 pt-3 text-xs">
@@ -199,7 +285,7 @@ function PurchaseCard({ listing }: { listing: Listing }) {
       </div>
 
       <p className="mt-3 text-[10px] text-zinc-600">
-        Body hash: <span className="font-mono">{listing.body_hash?.slice(0, 20)}…</span>
+        Body hash: <span className="font-mono">{listing.body_hash?.slice(0, 20)}...</span>
       </p>
     </div>
   );

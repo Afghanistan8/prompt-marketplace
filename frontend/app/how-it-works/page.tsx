@@ -42,9 +42,10 @@ export default function HowItWorks() {
             works
           </h1>
           <p className="mt-4 text-lg leading-relaxed text-zinc-400">
-            A prompt marketplace where the chain itself judges quality. Two intelligent contracts on
-            GenLayer Bradbury handle every listing, every purchase, and every dispute — using real
-            LLM consensus across multiple validators, not a centralized backend API.
+            A prompt marketplace where the chain itself judges quality and delivers the goods. Two
+            intelligent contracts on GenLayer Bradbury handle every listing, every purchase, and the
+            purchaser-gated delivery of each prompt — using real LLM consensus across multiple
+            validators, not a centralized backend API.
           </p>
         </div>
       </section>
@@ -72,8 +73,8 @@ export default function HowItWorks() {
             <Step
               num="03"
               icon={<ShoppingBag className="h-5 w-5 text-purple-400" />}
-              title="Buyer pays in GEN"
-              body="A buyer calls PromptEscrow.buy() with the native GEN price attached. The seller is paid immediately, a 2.5% platform fee is held, and the purchase is recorded as an on-chain receipt."
+              title="Buyer pays, prompt unlocks"
+              body="A buyer calls PromptEscrow.buy(prompt_id) with the GEN price attached. Escrow verifies the listing against the Registry, pays the seller immediately, holds a 2.5% fee, and writes a purchase receipt that unlocks the full prompt body from the Registry."
             />
           </div>
         </div>
@@ -104,8 +105,8 @@ export default function HowItWorks() {
             />
             <Feature
               icon={<Layers className="h-5 w-5 text-purple-400" />}
-              title="Receipts as access control"
-              body="Once you buy a prompt, has_purchased(you, prompt_id) returns true on-chain forever. Any future content-gating layer (Lit Protocol, encrypted IPFS) can use this as the authorization check."
+              title="Purchaser-gated content delivery"
+              body="Settlement writes a purchase receipt into the Registry. get_purchased_body(prompt_id) returns the full prompt only to the seller or a wallet holding that receipt — every other caller is rejected. The prompt itself lives on-chain and is gated by the contract, not a backend."
             />
           </div>
         </div>
@@ -122,22 +123,24 @@ export default function HowItWorks() {
             <Contract
               title="PromptRegistry"
               address={REGISTRY_ADDRESS}
-              role="The listings contract"
-              description="Holds canonical metadata for every prompt: seller, title, description, price, LLM-assigned category, and deterministically-extracted tags. Runs LLM consensus paths for duplicate detection and categorization on every list_prompt call."
+              role="The listings + content contract"
+              description="Holds canonical metadata for every prompt plus the full prompt body on-chain: seller, title, description, price, LLM-assigned category, and deterministically-extracted tags. Runs LLM consensus for duplicate detection and categorization on every list_prompt, and delivers the body only to verified purchasers."
               methods={[
-                'list_prompt(title, description, target_models, price, ipfs_cid, body_hash, preview) — submit a new listing',
+                'list_prompt(title, description, target_models, price, ipfs_cid, body_hash, preview, body) — submit a new listing',
                 'get_listing(id) — read a single prompt',
                 'get_all_active(limit) — paginated active listings',
+                'get_purchased_body(id) — gated: full body for seller or purchaser only',
+                'record_purchase(buyer_hex, id) — escrow-only: writes receipt + increments sales',
                 'deactivate / reactivate(id) — seller controls',
               ]}
             />
             <Contract
               title="PromptEscrow"
               address={ESCROW_ADDRESS}
-              role="The payments + receipts contract"
-              description="Handles all GEN flow. Validates the buyer attached the right amount, forwards the seller's cut immediately via gl.chain.Account.emit_transfer, holds the 2.5% platform fee, and records who bought what. Fully deterministic — no LLM consensus needed for payments."
+              role="The payments + settlement contract"
+              description="Handles all GEN flow. Reads the authoritative seller, price, and active status from the Registry, validates the attached payment, forwards the seller's cut immediately via gl.chain.Account.emit_transfer, holds the 2.5% platform fee, and records the sale on both contracts in one atomic transaction. Fully deterministic — no LLM consensus needed for payments."
               methods={[
-                'buy(prompt_id, seller, price) — payable, executes the purchase',
+                'buy(prompt_id) — payable; verifies the listing against the Registry, then settles',
                 'has_purchased(buyer, prompt_id) — view, used for access checks',
                 'get_buyer_purchases(buyer) — view, list of owned prompts',
                 'get_sales_count(prompt_id) — view, lifetime sales',

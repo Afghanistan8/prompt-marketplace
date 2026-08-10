@@ -1,5 +1,30 @@
-# v0.2.2
+# v0.4.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
+#
+# The prompt repository: canonical listing metadata, LLM-validated
+# categorization + duplicate detection, the full prompt body, and
+# purchaser-gated content delivery.
+#
+# Changes vs v0.3.1 (steward feedback):
+#   1. Full prompt body is stored on-chain (body_of) with a generous limit
+#      (16k chars) so buyers receive the real prompt, not just a hash.
+#   2. get_body (UNGATED) is removed. In its place, get_purchased_body()
+#      returns the body ONLY to the seller or a wallet that has purchased,
+#      and raises a clear UserError otherwise. The purchaser receipt is a
+#      local O(1) lookup -- no cross-contract call at read time.
+#   3. record_purchase() is the escrow-only settlement hook: it writes the
+#      purchaser receipt AND increments the registry sales counter in one
+#      atomic state transition. increment_sales() is retained (escrow-only)
+#      for compatibility.
+#
+# GenVM notes:
+#   - The helper views consumed by the Escrow proxy (get_listing_*_*) return
+#     only str/u256 and never raise, because a revert there would revert a
+#     buy(). get_purchased_body is called only by the frontend, so it raises
+#     a clear error for unauthorized callers.
+#   - Reads carry an unauthenticated `from` on Bradbury Phase 1, so the view
+#     gate is an application-layer control, not a cryptographic one. See the
+#     "How content is gated" section of the README for the honest threat model.
 
 from genlayer import *
 
@@ -10,12 +35,13 @@ import typing
 STATUS_ACTIVE = "active"
 STATUS_INACTIVE = "inactive"
 STATUS_REJECTED = "rejected"
+STATUS_NONE = "none"
 
 ALLOWED_CATEGORIES_CSV = "agent-system-prompt,json-schema-extraction,code-generation,code-review,rag-retrieval,classification,summarization,translation,creative-writing,data-analysis,roleplay-character,tool-use,other"
 
 DUP_CHECK_CONTEXT_CAP = 10
 
-STOP_WORDS_CSV = "the,a,an,and,or,but,if,then,else,for,to,of,in,on,at,by,with,from,as,is,are,was,were,be,been,being,have,has,had,do,does,did,can,could,should,would,will,this,that,these,those,it,its,you,your,we,our,they,their,them,not,no,yes,so,too,very,just,more,most,less,least,some,any,all,each,every,one,two,three,four,five,uses,use,using,used,user,users,prompt,prompts,prompt's,model,models,returns,return,returning,returned,given,gives,giving,gave,output,outputs,input,inputs,based,when,where,how,what,which,who,whom,whose,why,about,into,onto,upon,without,within,through,across,over,under,above,below,after,before,between,against,toward,towards,here,there,now,then"
+STOP_WORDS_CSV = "the,a,an,and,or,but,if,then,else,for,to,of,in,on,at,by,with,from,as,is,are,was,were,be,been,being,have,has,had,do,does,did,can,could,should,would,will,this,that,these,those,it,its,you,your,we,our,they,their,them,not,no,yes,so,too,very,just,more,most,less,least,some,any,all,each,every,one,two,three,four,five,uses,use,using,used,user,users,prompt,prompts,model,models,returns,return,returning,returned,given,gives,giving,gave,output,outputs,input,inputs,based,when,where,how,what,which,who,whom,whose,why,about,into,onto,upon,without,within,through,across,over,under,above,below,after,before,between,against,toward,towards,here,there,now,then"
 
 
 class PromptRegistry(gl.Contract):
@@ -38,6 +64,14 @@ class PromptRegistry(gl.Contract):
     sales_count_of: TreeMap[u256, u256]
     rejection_reason_of: TreeMap[u256, str]
     exists_of: TreeMap[u256, bool]
+    body_of: TreeMap[u256, str]
+
+    # Purchaser receipts, written ONLY by the escrow contract during a
+    # settled purchase. This is what gates get_purchased_body().
+    #   key: "<buyer_hex_lower>:<prompt_id>"  ->  True
+    # An O(1) local lookup, so content delivery never depends on a
+    # cross-contract call at read time.
+    purchased_flag: TreeMap[str, bool]
 
     def __init__(self):
         self.owner = gl.message.sender_address
@@ -67,8 +101,8 @@ class PromptRegistry(gl.Contract):
         ipfs_cid: str,
         body_hash: str,
         preview: str,
+        body: str,
     ) -> u256:
-        # Deterministic checks
         if len(title.strip()) < 4:
             raise gl.vm.UserError("title too short")
         if len(title) > 120:
@@ -87,11 +121,14 @@ class PromptRegistry(gl.Contract):
             raise gl.vm.UserError("preview too long")
         if len(target_models_csv.strip()) == 0:
             raise gl.vm.UserError("must specify target model")
+        if len(body.strip()) < 10:
+            raise gl.vm.UserError("body too short")
+        if len(body) > 16000:
+            raise gl.vm.UserError("body too long (max 16000 chars)")
 
         seller = gl.message.sender_address
         prompt_id = self.next_id
 
-        # Duplicate check (LLM consensus on a binary decision)
         existing = self._collect_active_summaries()
 
         if len(existing) > 0:
@@ -145,11 +182,6 @@ Your response must be parseable JSON with no prefix or suffix."""
                 self.next_id = prompt_id + u256(1)
                 return prompt_id
 
-        # Categorize via LLM consensus.
-        # Output is constrained to a single enum value, so validators almost
-        # always agree. We do NOT ask the LLM for tags here — tag generation
-        # is too open-ended for strict_eq. We derive tags deterministically
-        # from the listing text below.
         def categorize() -> str:
             task = f"""You are categorizing a prompt listing for an AI prompt marketplace.
 
@@ -186,11 +218,8 @@ Your response must be parseable JSON with no prefix or suffix."""
         cat_result = json.loads(cat_raw)
         category = cat_result.get("category", "other")
 
-        # Deterministic tag extraction from title + description.
-        # Runs identically on every validator (no LLM, no consensus issue).
         tags_csv = self._extract_tags(title, description)
 
-        # Store
         self.seller_of[prompt_id] = seller
         self.title_of[prompt_id] = title
         self.description_of[prompt_id] = description
@@ -205,6 +234,7 @@ Your response must be parseable JSON with no prefix or suffix."""
         self.sales_count_of[prompt_id] = u256(0)
         self.rejection_reason_of[prompt_id] = ""
         self.exists_of[prompt_id] = True
+        self.body_of[prompt_id] = body
 
         self.next_id = prompt_id + u256(1)
         return prompt_id
@@ -235,6 +265,7 @@ Your response must be parseable JSON with no prefix or suffix."""
         self.sales_count_of[prompt_id] = u256(0)
         self.rejection_reason_of[prompt_id] = reason
         self.exists_of[prompt_id] = True
+        self.body_of[prompt_id] = ""
 
     # ---------- Seller controls ----------
 
@@ -266,6 +297,23 @@ Your response must be parseable JSON with no prefix or suffix."""
             raise gl.vm.UserError("only escrow")
         if prompt_id not in self.exists_of:
             raise gl.vm.UserError("no such prompt")
+        self.sales_count_of[prompt_id] = self.sales_count_of[prompt_id] + u256(1)
+
+    @gl.public.write
+    def record_purchase(self, buyer_hex: str, prompt_id: u256) -> None:
+        # Escrow-only settlement hook. Called once, atomically, from a
+        # successful PromptEscrow.buy(). It writes the purchaser receipt that
+        # gates get_purchased_body() AND increments the registry sales
+        # counter -- receipt and sales count therefore always move together.
+        if not self.escrow_set:
+            raise gl.vm.UserError("escrow not configured")
+        if gl.message.sender_address != self.escrow_contract:
+            raise gl.vm.UserError("only escrow")
+        if prompt_id not in self.exists_of:
+            raise gl.vm.UserError("no such prompt")
+
+        flag_key = buyer_hex.lower() + ":" + str(int(prompt_id))
+        self.purchased_flag[flag_key] = True
         self.sales_count_of[prompt_id] = self.sales_count_of[prompt_id] + u256(1)
 
     # ---------- Read views ----------
@@ -328,6 +376,53 @@ Your response must be parseable JSON with no prefix or suffix."""
             return {"set": False}
         return {"set": True, "address": str(self.escrow_contract.as_hex)}
 
+    # NEW in v0.3.1: return-only helper views (never raise, return sentinels)
+
+    @gl.public.view
+    def get_purchased_body(self, prompt_id: u256) -> str:
+        # Purchaser-gated content delivery. Returns the full prompt body ONLY
+        # to the seller or a wallet that holds a purchase receipt for this
+        # listing. Every other caller gets a clear, catchable error.
+        #
+        # NOTE ON THE THREAT MODEL: on Bradbury Phase 1, a read's `from`
+        # address is caller-supplied and unauthenticated, so this gate is an
+        # application-layer access control, not cryptographic proof of
+        # payment. It is exactly as strong as the receipt written by escrow
+        # during a real, paid settlement -- and no stronger. See the README.
+        if prompt_id not in self.exists_of:
+            raise gl.vm.UserError("no such prompt")
+
+        caller = gl.message.sender_address
+        if caller == self.seller_of[prompt_id]:
+            return self.body_of[prompt_id]
+
+        caller_hex = str(caller.as_hex).lower()
+        flag_key = caller_hex + ":" + str(int(prompt_id))
+        if flag_key in self.purchased_flag:
+            return self.body_of[prompt_id]
+
+        raise gl.vm.UserError(
+            "not authorized: purchase this prompt to unlock its full body"
+        )
+
+    @gl.public.view
+    def get_listing_seller_hex(self, prompt_id: u256) -> str:
+        if prompt_id not in self.exists_of:
+            return ""
+        return str(self.seller_of[prompt_id].as_hex)
+
+    @gl.public.view
+    def get_listing_price_wei(self, prompt_id: u256) -> u256:
+        if prompt_id not in self.exists_of:
+            return u256(0)
+        return self.price_wei_of[prompt_id]
+
+    @gl.public.view
+    def get_listing_status(self, prompt_id: u256) -> str:
+        if prompt_id not in self.exists_of:
+            return STATUS_NONE
+        return self.status_of[prompt_id]
+
     # ---------- Internal helpers ----------
 
     def _collect_active_summaries(self) -> str:
@@ -348,14 +443,10 @@ Your response must be parseable JSON with no prefix or suffix."""
         return "\n\n---\n\n".join(parts)
 
     def _extract_tags(self, title: str, description: str) -> str:
-        """Pull up to 5 lowercase tags from the listing text deterministically.
-        Same input always yields same output, so all validators agree without
-        any consensus call required."""
         stop_words = set(STOP_WORDS_CSV.split(","))
 
         text = (title + " " + description).lower()
 
-        # Replace common separators with spaces
         seps = ",.!?;:()[]{}\"'`~/\\|<>@#$%^&*=+\n\t"
         for ch in seps:
             text = text.replace(ch, " ")
@@ -371,7 +462,6 @@ Your response must be parseable JSON with no prefix or suffix."""
                 continue
             if w in seen:
                 continue
-            # skip pure numbers
             if w.replace(".", "").isdigit():
                 continue
             seen.append(w)

@@ -21,49 +21,57 @@ interface Props {
   onSuccess: () => void;
 }
 
-// Translate raw GenLayer errors into human-readable feedback.
 function humanizeError(raw: string): { message: string; hint: string | null } {
   const s = raw.toLowerCase();
   if (s.includes('already purchased')) {
     return {
       message: 'You already own this prompt.',
-      hint: 'Check "My Library" from the header to view it.',
+      hint: 'Check "My library" from the header to view it.',
+    };
+  }
+  if (s.includes('listing is not active')) {
+    return {
+      message: 'This listing was deactivated by the seller.',
+      hint: 'Try refreshing the marketplace to see current listings.',
+    };
+  }
+  if (s.includes('price does not match') || s.includes('attached value does not match')) {
+    return {
+      message: 'Payment amount did not match the current listing price.',
+      hint: 'Refresh and try again in case the listing was updated.',
+    };
+  }
+  if (s.includes('seller does not match')) {
+    return {
+      message: 'The seller on record has changed for this listing.',
+      hint: 'Refresh the marketplace and try again.',
     };
   }
   if (s.includes('undetermined')) {
     return {
       message: 'Validators could not reach consensus.',
-      hint: "Bradbury testnet occasionally hits this. Wait a minute and try again.",
+      hint: 'Bradbury testnet occasionally hits this. Wait a minute and try again.',
     };
   }
   if (s.includes('validators_timeout') || s.includes('validators timeout')) {
     return {
       message: 'Validators timed out reaching consensus.',
-      hint: 'This is a Bradbury Phase 1 testnet limitation. The auto-appeal will retry in ~30 min, or you can try a fresh purchase.',
+      hint: 'This is a Bradbury Phase 1 testnet limitation. Auto-appeal will retry in about 30 min.',
     };
   }
   if (s.includes('timed out waiting')) {
     return {
       message: 'The transaction is taking longer than expected.',
-      hint: 'It may still succeed. Check the transaction link, and refresh the marketplace after a minute.',
+      hint: 'It may still succeed. Check the transaction link and refresh after a minute.',
     };
   }
   if (s.includes('user rejected') || s.includes('user denied')) {
-    return {
-      message: 'You cancelled the transaction in your wallet.',
-      hint: null,
-    };
+    return { message: 'You cancelled the transaction in your wallet.', hint: null };
   }
   if (s.includes('insufficient funds') || s.includes('insufficient balance')) {
     return {
       message: 'Not enough GEN to complete this purchase.',
       hint: 'You need the listing price plus a small amount for gas.',
-    };
-  }
-  if (s.includes('attached value does not match')) {
-    return {
-      message: 'Payment amount did not match the listing price.',
-      hint: 'Refresh the page and try again — the listing may have been updated.',
     };
   }
   return { message: raw, hint: null };
@@ -103,7 +111,6 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
       setStage('signing');
       const { hash } = await buyPrompt(
         listing.id,
-        listing.seller as `0x${string}`,
         listing.price_wei,
         address as `0x${string}`
       );
@@ -117,6 +124,9 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
       invalidateCache('has_purchased');
       invalidateCache('buyer_purchases');
       invalidateCache('escrow_stats');
+      invalidateCache('all_active');
+      invalidateCache('listing:');
+      invalidateCache('purchased_body:');
       onSuccess();
     } catch (e) {
       console.error('[Buy] error:', e);
@@ -184,8 +194,7 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
               </div>
 
               <p className="mt-4 text-xs text-zinc-500">
-                The seller receives {formatGen((listing.price_wei * 9750n) / 10000n)} GEN
-                immediately. Platform fee: 2.5%.
+                Escrow verifies the seller, price, and active status directly against the Registry contract before accepting payment. The seller receives {formatGen((listing.price_wei * 9750n) / 10000n)} GEN immediately. Platform fee: 2.5%.
               </p>
 
               {errorMsg && (
@@ -204,8 +213,8 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
                 <div className="mt-4 flex items-center gap-2 rounded-md border border-purple-500/20 bg-purple-500/5 p-3 text-sm text-purple-200">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>
-                    {stage === 'signing' && 'Approve the transaction in your wallet…'}
-                    {stage === 'waiting' && 'Submitting purchase on Bradbury (~30-90s)…'}
+                    {stage === 'signing' && 'Approve the transaction in your wallet...'}
+                    {stage === 'waiting' && 'Escrow verifying against Registry + settling on Bradbury (about 30-90s)...'}
                   </span>
                 </div>
               )}
@@ -252,7 +261,7 @@ function SuccessView({ txHash, onDone }: { txHash: string | null; onDone: () => 
       <CheckCircle2 className="mx-auto h-10 w-10 text-green-400" />
       <h3 className="mt-3 text-base font-medium">Purchase complete</h3>
       <p className="mt-1 text-sm text-zinc-400">
-        Seller paid, sale recorded on-chain. Check "My Library" to view your new prompt.
+        Seller paid, sale recorded on both contracts. Check "My library" to view the unlocked prompt.
       </p>
       {txHash && (
         <a
@@ -261,7 +270,7 @@ function SuccessView({ txHash, onDone }: { txHash: string | null; onDone: () => 
           rel="noopener noreferrer"
           className="mt-3 inline-block text-xs text-purple-400 hover:text-purple-300"
         >
-          View transaction →
+          View transaction &#8594;
         </a>
       )}
       <div className="mt-5">

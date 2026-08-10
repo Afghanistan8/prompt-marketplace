@@ -19,7 +19,6 @@ interface Props {
   onSuccess: () => void;
 }
 
-// Same humanization strategy as BuyConfirmModal — surface friendly errors.
 function humanizeError(raw: string): { message: string; hint: string | null } {
   const s = raw.toLowerCase();
   if (s.includes('duplicate')) {
@@ -31,32 +30,35 @@ function humanizeError(raw: string): { message: string; hint: string | null } {
   if (s.includes('undetermined')) {
     return {
       message: 'Validators could not agree on how to categorize this prompt.',
-      hint: 'Try adding more specific technical detail to the description so the classification is unambiguous, then resubmit.',
+      hint: 'Try adding more specific technical detail to the description, then resubmit.',
     };
   }
   if (s.includes('validators_timeout') || s.includes('validators timeout')) {
     return {
       message: 'Validators timed out reaching consensus.',
-      hint: 'Bradbury Phase 1 testnet occasionally hits this. The auto-appeal will retry in ~30 min, or you can try again fresh.',
+      hint: 'Bradbury Phase 1 testnet occasionally hits this. Auto-appeal will retry in about 30 min.',
+    };
+  }
+  if (s.includes('body too short')) {
+    return { message: 'The prompt body is too short.', hint: 'Provide at least 10 characters.' };
+  }
+  if (s.includes('body too long')) {
+    return {
+      message: 'The prompt body exceeds 16000 characters.',
+      hint: 'Trim it down or split into multiple listings.',
     };
   }
   if (s.includes('timed out waiting')) {
     return {
       message: 'The transaction is taking longer than expected.',
-      hint: 'It may still succeed. Check the transaction link and refresh the marketplace after a minute.',
+      hint: 'It may still succeed. Check the transaction link and refresh after a minute.',
     };
   }
   if (s.includes('user rejected') || s.includes('user denied')) {
-    return {
-      message: 'You cancelled the transaction in your wallet.',
-      hint: null,
-    };
+    return { message: 'You cancelled the transaction in your wallet.', hint: null };
   }
   if (s.includes('insufficient funds') || s.includes('insufficient balance')) {
-    return {
-      message: 'Not enough GEN to cover gas.',
-      hint: null,
-    };
+    return { message: 'Not enough GEN to cover gas.', hint: null };
   }
   return { message: raw, hint: null };
 }
@@ -101,7 +103,8 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
     }
     if (title.trim().length < 4) return setErrorMsg('Title must be at least 4 characters.');
     if (description.trim().length < 20) return setErrorMsg('Description must be at least 20 characters.');
-    if (body.trim().length < 10) return setErrorMsg('Prompt body is required.');
+    if (body.trim().length < 10) return setErrorMsg('Prompt body must be at least 10 characters.');
+    if (body.length > 16000) return setErrorMsg('Prompt body exceeds 16000 characters. Please trim.');
     if (!targetModels.trim()) return setErrorMsg('Target models required.');
     const priceNum = Number(priceGen);
     if (!Number.isFinite(priceNum) || priceNum <= 0) return setErrorMsg('Price must be a positive number.');
@@ -123,6 +126,7 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
           ipfs_cid: cid,
           body_hash: hash,
           preview: previewText,
+          body: body,
         },
         address as `0x${string}`
       );
@@ -205,10 +209,10 @@ export function ListPromptModal({ open, onClose, onSuccess }: Props) {
             <div className="mt-4 flex items-center gap-2 rounded-md border border-purple-500/20 bg-purple-500/5 p-3 text-sm text-purple-200">
               <Loader2 className="h-4 w-4 animate-spin" />
               <span>
-                {stage === 'preparing' && 'Hashing prompt body…'}
-                {stage === 'signing' && 'Approve the transaction in your wallet…'}
+                {stage === 'preparing' && 'Hashing prompt body...'}
+                {stage === 'signing' && 'Approve the transaction in your wallet...'}
                 {stage === 'waiting' &&
-                  'Waiting for validator consensus. LLM categorization + duplicate check (~30-90s)…'}
+                  'Waiting for validator consensus. LLM categorization + duplicate check (about 30-90s)...'}
               </span>
             </div>
           )}
@@ -251,21 +255,21 @@ interface FormProps {
 function Form(p: FormProps) {
   return (
     <div className="space-y-4">
-      <Field label="Title" hint="Short, descriptive name (4–120 chars)">
+      <Field label="Title" hint="Short, descriptive name (4-120 chars)">
         <input value={p.title} onChange={(e) => p.setTitle(e.target.value)} disabled={p.disabled}
           placeholder="e.g. Strict JSON Extractor for Invoices" className={inputCls} />
       </Field>
-      <Field label="Description" hint="What does this prompt do? (20–2000 chars)">
+      <Field label="Description" hint="What does this prompt do? (20-2000 chars)">
         <textarea value={p.description} onChange={(e) => p.setDescription(e.target.value)} disabled={p.disabled}
           rows={3}
-          placeholder="Explain what the prompt does, its input format, and its output format. Validators use this to categorize and check for duplicates."
+          placeholder="Explain what the prompt does, its input format, and output format. Validators use this to categorize and check for duplicates."
           className={inputCls} />
       </Field>
-      <Field label="Prompt body" hint="The actual prompt text. Hashed on submit; full body stays off-chain for v1.">
+      <Field label="Prompt body" hint="The actual prompt text. Stored on-chain; unlocked in buyer's library after purchase.">
         <textarea value={p.body} onChange={(e) => p.setBody(e.target.value)} disabled={p.disabled}
-          rows={5} placeholder="You are an assistant that..." className={`${inputCls} font-mono text-xs`} />
+          rows={6} placeholder="You are an assistant that..." className={`${inputCls} font-mono text-xs`} />
       </Field>
-      <Field label="Preview" hint="Optional. Public teaser shown before purchase. Defaults to first 200 chars of body.">
+      <Field label="Preview" hint="Public teaser shown before purchase. Defaults to first 200 chars of body if empty.">
         <textarea value={p.preview} onChange={(e) => p.setPreview(e.target.value)} disabled={p.disabled}
           rows={2} placeholder="(optional)" className={inputCls} />
       </Field>
@@ -302,14 +306,13 @@ function SuccessView({ txHash, onDone }: { txHash: string | null; onDone: () => 
       <CheckCircle2 className="mx-auto h-10 w-10 text-green-400" />
       <h3 className="mt-3 text-base font-medium">Listing submitted</h3>
       <p className="mt-1 text-sm text-zinc-400">
-        Validators reached consensus. Check the listings section to see how your prompt was
-        categorized — or whether it was caught as a duplicate.
+        Validators reached consensus and stored the full body on-chain.
       </p>
       {txHash && (
         <a href={`https://explorer-bradbury.genlayer.com/tx/${txHash}`}
           target="_blank" rel="noopener noreferrer"
           className="mt-3 inline-block text-xs text-purple-400 hover:text-purple-300">
-          View transaction →
+          View transaction &#8594;
         </a>
       )}
       <div className="mt-5">

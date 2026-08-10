@@ -4,7 +4,6 @@ import { createClient } from 'genlayer-js';
 import { testnetBradbury } from 'genlayer-js/chains';
 import { REGISTRY_ADDRESS, ESCROW_ADDRESS } from './wagmi';
 
-// Read-only client
 const readClient = createClient({ chain: testnetBradbury });
 
 // ---------- Types ----------
@@ -171,6 +170,27 @@ export async function getAllActive(limit = 50n): Promise<ActiveListing[]> {
   });
 }
 
+// v0.4: purchaser-gated content delivery.
+// The Registry's get_purchased_body verifies the caller (`from`) is the
+// seller or a recorded purchaser, so we MUST send the connected wallet as
+// `from`. A client bound to `account` puts that address on the underlying
+// gen_call; the ungated getBody is gone. Unauthorized callers get a thrown
+// Error ("gen_call failed: not authorized ..."), surfaced to the UI.
+export async function getPurchasedBody(
+  promptId: bigint,
+  account: `0x${string}`
+): Promise<string> {
+  return cached(`purchased_body:${account.toLowerCase()}:${promptId}`, async () => {
+    const client = createClient({ chain: testnetBradbury, account });
+    const result = await client.readContract({
+      address: REGISTRY_ADDRESS,
+      functionName: 'get_purchased_body',
+      args: [promptId],
+    });
+    return String(result ?? '');
+  });
+}
+
 // ---------- REGISTRY writes ----------
 
 export interface ListPromptArgs {
@@ -181,6 +201,7 @@ export interface ListPromptArgs {
   ipfs_cid: string;
   body_hash: string;
   preview: string;
+  body: string;
 }
 
 export async function listPrompt(args: ListPromptArgs, account: `0x${string}`): Promise<{ hash: string }> {
@@ -196,6 +217,7 @@ export async function listPrompt(args: ListPromptArgs, account: `0x${string}`): 
       args.ipfs_cid,
       args.body_hash,
       args.preview,
+      args.body,
     ],
     value: 0n,
   } as any)) as string;
@@ -263,9 +285,12 @@ export async function getEscrowStats(): Promise<{
 
 // ---------- ESCROW writes ----------
 
+// v0.4: buy() takes ONLY prompt_id. Escrow reads the authoritative seller
+// and price from the Registry via a synchronous cross-contract view, so the
+// caller can no longer spoof them. priceWei is still passed here only because
+// the wallet must attach exactly that much GEN as msg.value.
 export async function buyPrompt(
   promptId: bigint,
-  seller: `0x${string}`,
   priceWei: bigint,
   account: `0x${string}`
 ): Promise<{ hash: string }> {
@@ -273,7 +298,7 @@ export async function buyPrompt(
   const hash = (await writeClient.writeContract({
     address: ESCROW_ADDRESS,
     functionName: 'buy',
-    args: [promptId, seller, priceWei],
+    args: [promptId],
     value: priceWei,
   } as any)) as string;
   return { hash };
@@ -318,5 +343,5 @@ export function formatGen(wei: bigint | undefined | null): string {
 
 export function shortAddress(addr: string | undefined | null): string {
   if (!addr) return '';
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
