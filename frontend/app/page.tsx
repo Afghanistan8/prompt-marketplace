@@ -30,11 +30,13 @@ export default function Home() {
             <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
               the chain itself
             </span>{' '}
-            judges quality.
+            judges quality and delivers the goods.
           </h1>
           <p className="mt-6 text-lg text-zinc-400">
-            Listings are auto-categorized, duplicates are auto-rejected, and
-            disputes are resolved by GenLayer Bradbury on-chain LLM consensus.
+            Listings are auto-categorized, duplicates are auto-rejected, payments
+            settle on-chain, and the purchased prompt is delivered straight from
+            the contract to verified buyers — all on GenLayer Bradbury LLM
+            consensus, no centralized backend.
           </p>
         </div>
       </section>
@@ -48,13 +50,13 @@ export default function Home() {
           />
           <Feature
             icon={<Sparkles className="h-5 w-5" />}
-            title="Dispute resolution"
-            body="Buyers can challenge listings. Validators re-run the prompt and rule."
+            title="Registry-verified settlement"
+            body="buy() reads the authoritative seller, price, and status from the Registry, pays the seller, and records the sale atomically."
           />
           <Feature
             icon={<Search className="h-5 w-5" />}
-            title="Pay-to-unlock"
-            body="Prompts are encrypted on IPFS. Purchase unlocks decryption via Lit Protocol."
+            title="Purchaser-gated delivery"
+            body="The full prompt body lives on-chain and unlocks in your library only after a real, paid on-chain purchase."
           />
         </div>
       </section>
