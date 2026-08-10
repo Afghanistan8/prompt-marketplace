@@ -49,6 +49,21 @@ class PromptRegistryProxy:
             ...
 
 
+# Native-GEN payouts go to plain wallets (EOAs), whose balances live on the
+# chain layer. gl.evm.contract_interface gives us a proxy whose emit_transfer
+# posts a bare EthSend (empty calldata + value) to that address -- the correct
+# way to move native GEN out to an EOA. (The earlier `gl.chain.Account(...)`
+# API does not exist in this GenVM: `genlayer.gl` has no `chain` attribute,
+# which is why every buy() reverted with AttributeError.)
+@gl.evm.contract_interface
+class EthAccount:
+    class View:
+        pass
+
+    class Write:
+        pass
+
+
 class PromptEscrow(gl.Contract):
     owner: Address
     platform_fee_bps: u256
@@ -154,7 +169,7 @@ class PromptEscrow(gl.Contract):
         self.next_purchase_id = purchase_id + u256(1)
 
         # Push payment to the seller (native GEN). Fee stays in the contract.
-        gl.chain.Account(seller).emit_transfer(value=proceeds)
+        EthAccount(seller).emit_transfer(value=proceeds)
 
         # One atomic Registry message: record the purchaser receipt (which
         # gates content delivery) AND bump the registry sales counter.
@@ -172,7 +187,7 @@ class PromptEscrow(gl.Contract):
         if amount == u256(0):
             raise gl.vm.UserError("no platform fees to withdraw")
         self.platform_balance = u256(0)
-        gl.chain.Account(self.owner).emit_transfer(value=amount)
+        EthAccount(self.owner).emit_transfer(value=amount)
         return amount
 
     # ---------- READ VIEWS ----------

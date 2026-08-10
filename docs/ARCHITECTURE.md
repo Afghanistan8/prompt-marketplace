@@ -30,7 +30,7 @@ Buyer -> PromptEscrow.buy(prompt_id)   [attaches exactly price_wei GEN]
             +-> guard: buyer != seller
             +-> guard: not already purchased (O(1) flag lookup)
             |
-            +-> gl.chain.Account(seller).emit_transfer(value = price - 2.5% fee)
+            +-> EthAccount(seller).emit_transfer(value = price - 2.5% fee)  # gl.evm proxy, native GEN to EOA
             +-> registry.emit(on='finalized').record_purchase(buyer_hex, prompt_id)
                   |
                   +-> writes purchaser receipt   (gates content delivery)

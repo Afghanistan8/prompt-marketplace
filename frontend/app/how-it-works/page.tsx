@@ -138,7 +138,7 @@ export default function HowItWorks() {
               title="PromptEscrow"
               address={ESCROW_ADDRESS}
               role="The payments + settlement contract"
-              description="Handles all GEN flow. Reads the authoritative seller, price, and active status from the Registry, validates the attached payment, forwards the seller's cut immediately via gl.chain.Account.emit_transfer, holds the 2.5% platform fee, and records the sale on both contracts in one atomic transaction. Fully deterministic — no LLM consensus needed for payments."
+              description="Handles all GEN flow. Reads the authoritative seller, price, and active status from the Registry, validates the attached payment, forwards the seller's cut immediately via a native-GEN emit_transfer (gl.evm proxy), holds the 2.5% platform fee, and records the sale on both contracts in one atomic transaction. Fully deterministic — no LLM consensus needed for payments."
               methods={[
                 'buy(prompt_id) — payable; verifies the listing against the Registry, then settles',
                 'has_purchased(buyer, prompt_id) — view, used for access checks',

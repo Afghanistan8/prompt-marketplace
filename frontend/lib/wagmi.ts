@@ -10,5 +10,5 @@
 //   Escrow:   reads seller/price/status authoritatively from the Registry,
 //     and on settlement calls record_purchase to write the receipt + bump
 //     the registry sales count atomically.
-export const REGISTRY_ADDRESS = '0x26e4c580eC2D2D388a810334Ed2A111208c3c906' as `0x${string}`;
-export const ESCROW_ADDRESS = '0xB1001732103264822F775E25CFebE2BB80D0b3ea' as `0x${string}`;
+export const REGISTRY_ADDRESS = '0x254614E13BFC0772e8367Bce3674820a0Ece4CA0' as `0x${string}`;
+export const ESCROW_ADDRESS = '0x99bb2e9d5A4e3babdbd3158e5CAb0c0C1fABA04c' as `0x${string}`;

@@ -14,8 +14,8 @@ centralized backend API.
 
 | Contract | Address | Role |
 |---|---|---|
-| PromptRegistry v0.4.0 | `0x26e4c580eC2D2D388a810334Ed2A111208c3c906` | Listings, LLM auto-categorization, duplicate detection, on-chain prompt body, purchaser-gated delivery |
-| PromptEscrow v0.4.0 | `0xB1001732103264822F775E25CFebE2BB80D0b3ea` | Registry-verified payable purchases, seller payouts, atomic settlement, double-buy prevention |
+| PromptRegistry v0.4.0 | `0x254614E13BFC0772e8367Bce3674820a0Ece4CA0` | Listings, LLM auto-categorization, duplicate detection, on-chain prompt body, purchaser-gated delivery |
+| PromptEscrow v0.4.0 | `0x99bb2e9d5A4e3babdbd3158e5CAb0c0C1fABA04c` | Registry-verified payable purchases, seller payouts, atomic settlement, double-buy prevention |
 
 ## Features
 
@@ -37,7 +37,8 @@ centralized backend API.
   the 2.5% fee, and writes the purchase receipt + increments the sales count on
   the Registry, all-or-nothing
 - **Native GEN payments** -- 97.5% forwarded to the seller immediately via
-  `gl.chain.Account.emit_transfer`, 2.5% platform fee
+  the seller's EOA proxy `emit_transfer` (`gl.evm.contract_interface`), 2.5%
+  platform fee
 - **Double-buy prevention** -- O(1) guard; `buy()` reverts if the buyer already
   owns the prompt
 - **My Library** -- buyers see and read every prompt they own at `/library`,
