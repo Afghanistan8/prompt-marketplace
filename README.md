@@ -12,13 +12,10 @@ centralized backend API.
 
 ## Contracts (GenLayer Bradbury Testnet, chain id 4221)
 
-> Redeploy the v0.4.0 pair and paste the new addresses here and in
-> `frontend/lib/wagmi.ts`. See **Deploying / migrating** below.
-
 | Contract | Address | Role |
 |---|---|---|
-| PromptRegistry v0.4.0 | `<REGISTRY_ADDRESS>` | Listings, LLM auto-categorization, duplicate detection, on-chain prompt body, purchaser-gated delivery |
-| PromptEscrow v0.4.0 | `<ESCROW_ADDRESS>` | Registry-verified payable purchases, seller payouts, atomic settlement, double-buy prevention |
+| PromptRegistry v0.4.0 | `0x26e4c580eC2D2D388a810334Ed2A111208c3c906` | Listings, LLM auto-categorization, duplicate detection, on-chain prompt body, purchaser-gated delivery |
+| PromptEscrow v0.4.0 | `0xB1001732103264822F775E25CFebE2BB80D0b3ea` | Registry-verified payable purchases, seller payouts, atomic settlement, double-buy prevention |
 
 ## Features
 

@@ -1,6 +1,6 @@
 # v0.4.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
-#
+
 # Settlement contract for the Prompt Marketplace.
 #
 # What changed vs v0.3.1 (steward feedback):
