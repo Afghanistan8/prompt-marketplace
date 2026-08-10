@@ -1,28 +1,11 @@
 'use client';
 
-import { ReactNode, useState } from 'react';
-import { WagmiProvider } from 'wagmi';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
-import '@rainbow-me/rainbowkit/styles.css';
-import { wagmiConfig } from './wagmi';
+import { ReactNode } from 'react';
+import { WalletProvider } from './wallet';
 
+// v0.4.0 wallet stack: a custom EIP-6963 provider (lib/wallet.tsx) replaces
+// wagmi + RainbowKit. genlayer-js signs through the exact provider the user
+// picks, so the right wallet always signs even with several extensions installed.
 export function Providers({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient());
-
-  return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider
-          theme={darkTheme({
-            accentColor: '#a855f7',
-            accentColorForeground: 'white',
-            borderRadius: 'medium',
-          })}
-        >
-          {children}
-        </RainbowKitProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
-  );
+  return <WalletProvider>{children}</WalletProvider>;
 }

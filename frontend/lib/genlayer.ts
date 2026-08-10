@@ -6,6 +6,34 @@ import { REGISTRY_ADDRESS, ESCROW_ADDRESS } from './wagmi';
 
 const readClient = createClient({ chain: testnetBradbury });
 
+// ---------- Active wallet provider ----------
+//
+// genlayer-js signs through `config.provider || window.ethereum`. With multiple
+// wallet extensions installed, window.ethereum is whichever one won the slot, so
+// signing went to the wrong wallet. The EIP-6963 picker (lib/wallet.tsx) records
+// the provider the user actually selected here, and every signing / gated-read
+// client below passes it explicitly so the chosen wallet is the one that signs.
+interface WalletProvider {
+  request(args: { method: string; params?: unknown[] | object }): Promise<unknown>;
+}
+let activeProvider: WalletProvider | null = null;
+
+export function setActiveProvider(provider: WalletProvider | null): void {
+  activeProvider = provider;
+}
+
+export function getActiveProvider(): WalletProvider | null {
+  return activeProvider;
+}
+
+// Build a client bound to `account`, routing wallet methods to the selected
+// provider when one is connected (falls back to genlayer-js's default otherwise).
+function walletClient(account: `0x${string}`) {
+  const cfg: Record<string, unknown> = { chain: testnetBradbury, account };
+  if (activeProvider) cfg.provider = activeProvider;
+  return createClient(cfg as any);
+}
+
 // ---------- Types ----------
 
 export interface Listing {
@@ -181,7 +209,7 @@ export async function getPurchasedBody(
   account: `0x${string}`
 ): Promise<string> {
   return cached(`purchased_body:${account.toLowerCase()}:${promptId}`, async () => {
-    const client = createClient({ chain: testnetBradbury, account });
+    const client = walletClient(account);
     const result = await client.readContract({
       address: REGISTRY_ADDRESS,
       functionName: 'get_purchased_body',
@@ -205,7 +233,7 @@ export interface ListPromptArgs {
 }
 
 export async function listPrompt(args: ListPromptArgs, account: `0x${string}`): Promise<{ hash: string }> {
-  const writeClient = createClient({ chain: testnetBradbury, account });
+  const writeClient = walletClient(account);
   const hash = (await writeClient.writeContract({
     address: REGISTRY_ADDRESS,
     functionName: 'list_prompt',
@@ -294,7 +322,7 @@ export async function buyPrompt(
   priceWei: bigint,
   account: `0x${string}`
 ): Promise<{ hash: string }> {
-  const writeClient = createClient({ chain: testnetBradbury, account });
+  const writeClient = walletClient(account);
   const hash = (await writeClient.writeContract({
     address: ESCROW_ADDRESS,
     functionName: 'buy',
@@ -305,7 +333,7 @@ export async function buyPrompt(
 }
 
 export async function waitForTx(hash: string, account: `0x${string}`): Promise<any> {
-  const writeClient = createClient({ chain: testnetBradbury, account });
+  const writeClient = walletClient(account);
   return (writeClient as any).waitForTransactionReceipt({
     hash,
     status: 'ACCEPTED',

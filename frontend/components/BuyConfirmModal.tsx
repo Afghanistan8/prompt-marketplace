@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useAccount } from 'wagmi';
+import { useWallet } from '../lib/wallet';
 import { X, Loader2, CheckCircle2, AlertCircle, ShoppingBag } from 'lucide-react';
 import {
   buyPrompt,
@@ -78,7 +78,7 @@ function humanizeError(raw: string): { message: string; hint: string | null } {
 }
 
 export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useWallet();
   const [stage, setStage] = useState<Stage>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [errorHint, setErrorHint] = useState<string | null>(null);

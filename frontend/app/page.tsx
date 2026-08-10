@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Sparkles, ShieldCheck, Search } from 'lucide-react';
 import { Marketplace } from '../components/Marketplace';
+import { WalletButton } from '../components/WalletButton';
 
 export default function Home() {
   return (
@@ -19,7 +19,7 @@ export default function Home() {
               GenLayer
             </span>
           </div>
-          <div className="flex items-center gap-4"><Link href="/how-it-works" className="text-sm text-zinc-400 transition hover:text-zinc-200">How it works</Link><Link href="/library" className="text-sm text-zinc-400 transition hover:text-zinc-200">My library</Link><ConnectButton /></div>
+          <div className="flex items-center gap-4"><Link href="/how-it-works" className="text-sm text-zinc-400 transition hover:text-zinc-200">How it works</Link><Link href="/library" className="text-sm text-zinc-400 transition hover:text-zinc-200">My library</Link><WalletButton /></div>
         </div>
       </header>
 

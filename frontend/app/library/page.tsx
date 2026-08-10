@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useAccount } from 'wagmi';
 import Link from 'next/link';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useWallet } from '../../lib/wallet';
+import { WalletButton } from '../../components/WalletButton';
 import {
   getBuyerPurchases,
   getListing,
@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 
 export default function Library() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useWallet();
   const [purchases, setPurchases] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +70,7 @@ export default function Library() {
             <ArrowLeft className="h-4 w-4" />
             Back to marketplace
           </Link>
-          <ConnectButton />
+          <WalletButton />
         </div>
       </header>
 
@@ -105,7 +105,7 @@ export default function Library() {
                 Your purchases live on-chain. Connect the wallet you bought with to see them.
               </p>
               <div className="flex justify-center">
-                <ConnectButton />
+                <WalletButton />
               </div>
             </div>
           )}

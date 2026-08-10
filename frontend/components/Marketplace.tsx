@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useAccount } from 'wagmi';
+import { useWallet } from '../lib/wallet';
 import {
   getAllActive,
   getBuyerPurchases,
@@ -16,7 +16,7 @@ import { ListPromptModal } from './ListPromptModal';
 import { BuyConfirmModal } from './BuyConfirmModal';
 
 export function Marketplace() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useWallet();
   const [listings, setListings] = useState<ActiveListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -161,12 +161,12 @@ export default function HowItWorks() {
               body="Intelligent contracts in Python, equivalence-principle consensus, on-chain LLM calls via gl.nondet.exec_prompt."
             />
             <StackCard
-              title="Next.js + wagmi"
-              body="App Router on Vercel. wagmi 2 + RainbowKit for wallet flow. genlayer-js SDK for contract reads + writes."
+              title="Next.js"
+              body="App Router on Vercel. A custom EIP-6963 wallet layer for connection + signing. genlayer-js SDK for contract reads + writes."
             />
             <StackCard
               title="Any EVM wallet"
-              body="OKX, MetaMask, anything WalletConnect-compatible. The frontend bypasses MetaMask-only Snap RPCs to work with all wallets."
+              body="OKX, MetaMask, Phantom, Rabby — every installed wallet is discovered via EIP-6963 and the one you pick is the one that signs."
             />
           </div>
         </div>
