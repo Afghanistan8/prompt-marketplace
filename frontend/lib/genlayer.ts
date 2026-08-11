@@ -2,6 +2,7 @@
 
 import { createClient } from 'genlayer-js';
 import { testnetBradbury } from 'genlayer-js/chains';
+import { CalldataAddress } from 'genlayer-js/types';
 import { REGISTRY_ADDRESS, ESCROW_ADDRESS } from './wagmi';
 
 const readClient = createClient({ chain: testnetBradbury });
@@ -72,6 +73,20 @@ function toBigInt(v: unknown): bigint {
   if (typeof v === 'number') return BigInt(Math.trunc(v));
   if (typeof v === 'string') return BigInt(v);
   return 0n;
+}
+
+// GenVM `Address` parameters must be encoded with the calldata ADDR tag, not as
+// a plain string. genlayer-js serializes a bare JS string as a GenVM `str`, so a
+// contract method typed `buyer: Address` receives a str and blows up on
+// `buyer.as_hex`. Wrapping the 20 address bytes in CalldataAddress makes
+// genlayer-js emit the correct address type. Used for the escrow reads
+// (has_purchased / get_buyer_purchases) whose signatures take an Address.
+function toCalldataAddress(hex: `0x${string}`): CalldataAddress {
+  const clean = hex.replace(/^0x/, '');
+  if (clean.length !== 40) throw new Error(`invalid address: ${hex}`);
+  const bytes = new Uint8Array(20);
+  for (let i = 0; i < 20; i++) bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
+  return new CalldataAddress(bytes);
 }
 
 function normalizeListing(raw: any): Listing {
@@ -259,7 +274,7 @@ export async function hasPurchased(buyer: `0x${string}`, promptId: bigint): Prom
     const result = await readClient.readContract({
       address: ESCROW_ADDRESS,
       functionName: 'has_purchased',
-      args: [buyer, promptId],
+      args: [toCalldataAddress(buyer), promptId],
     });
     return Boolean(result);
   });
@@ -281,7 +296,7 @@ export async function getBuyerPurchases(buyer: `0x${string}`): Promise<bigint[]>
     const result = (await readClient.readContract({
       address: ESCROW_ADDRESS,
       functionName: 'get_buyer_purchases',
-      args: [buyer],
+      args: [toCalldataAddress(buyer)],
     })) as any[];
     if (!Array.isArray(result)) return [];
     return result.map(toBigInt);

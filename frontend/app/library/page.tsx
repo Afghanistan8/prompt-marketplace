@@ -161,32 +161,57 @@ function PurchaseCard({ listing, account }: { listing: Listing; account: `0x${st
   const [body, setBody] = useState<string | null>(null);
   const [bodyLoading, setBodyLoading] = useState(true);
   const [bodyError, setBodyError] = useState<string | null>(null);
+  const [finalizing, setFinalizing] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!listing.id) return;
+    const promptId = listing.id;
     let cancelled = false;
-    setBodyLoading(true);
-    setBodyError(null);
-    getPurchasedBody(listing.id, account)
-      .then((b) => {
-        if (!cancelled) setBody(b);
-      })
-      .catch((e) => {
-        if (!cancelled) {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 24; // ~12 min at 30s while the buy finalizes
+
+    const attempt = () => {
+      setBodyLoading(true);
+      getPurchasedBody(promptId, account)
+        .then((b) => {
+          if (cancelled) return;
+          setBody(b);
+          setFinalizing(false);
+          setBodyError(null);
+          setBodyLoading(false);
+        })
+        .catch((e) => {
+          if (cancelled) return;
           const raw = e instanceof Error ? e.message : String(e);
-          setBodyError(
-            /not authorized/i.test(raw)
-              ? 'This wallet is not authorized to view this prompt. Reconnect the wallet you purchased with.'
-              : 'Could not load the prompt body. Try refreshing in a moment.'
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setBodyLoading(false);
-      });
+          // Every card here is a prompt this wallet already bought (the id came
+          // from get_buyer_purchases, which reads the escrow's ACCEPTED-time
+          // state). A "not authorized" is therefore NOT a real access failure --
+          // it's the ACCEPTED -> FINALIZED window before the Registry receipt
+          // (emitted on='finalized') lands. Show a finalizing state and retry,
+          // rather than a misleading "reconnect your wallet" error.
+          if (/not authorized/i.test(raw)) {
+            setFinalizing(true);
+            setBodyError(null);
+            setBodyLoading(false);
+            if (attempts < MAX_ATTEMPTS) {
+              attempts += 1;
+              // The failed read isn't cached; just re-poll after a beat.
+              retryTimer = setTimeout(attempt, 30_000);
+            }
+          } else {
+            setFinalizing(false);
+            setBodyError('Could not load the prompt body. Try refreshing in a moment.');
+            setBodyLoading(false);
+          }
+        });
+    };
+    attempt();
+
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [listing.id, account]);
 
@@ -260,15 +285,25 @@ function PurchaseCard({ listing, account }: { listing: Listing; account: `0x${st
             Fetching body from Registry contract...
           </div>
         )}
-        {bodyError && !bodyLoading && (
+        {finalizing && !bodyLoading && (
+          <div className="flex items-start gap-2 text-xs text-purple-300/90">
+            <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin" />
+            <span>
+              Purchase accepted — waiting for the Registry receipt to finalize on
+              Bradbury. The full prompt unlocks automatically once settlement is
+              final (usually a couple of minutes).
+            </span>
+          </div>
+        )}
+        {bodyError && !bodyLoading && !finalizing && (
           <p className="text-xs text-red-400">{bodyError}</p>
         )}
-        {!bodyLoading && !bodyError && body && (
+        {!bodyLoading && !finalizing && !bodyError && body && (
           <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-zinc-200">
             {body}
           </pre>
         )}
-        {!bodyLoading && !bodyError && !body && (
+        {!bodyLoading && !finalizing && !bodyError && !body && (
           <p className="text-xs text-zinc-500">(empty body)</p>
         )}
       </div>

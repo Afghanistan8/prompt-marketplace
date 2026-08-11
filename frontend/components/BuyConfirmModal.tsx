@@ -259,9 +259,9 @@ function SuccessView({ txHash, onDone }: { txHash: string | null; onDone: () => 
   return (
     <div className="py-4 text-center">
       <CheckCircle2 className="mx-auto h-10 w-10 text-green-400" />
-      <h3 className="mt-3 text-base font-medium">Purchase complete</h3>
+      <h3 className="mt-3 text-base font-medium">Purchase accepted</h3>
       <p className="mt-1 text-sm text-zinc-400">
-        Seller paid, sale recorded on both contracts. Check "My library" to view the unlocked prompt.
+        Your payment cleared consensus. The seller payout and your prompt unlock finalize on-chain in a couple of minutes — open "My library" and the prompt appears automatically once settlement is final.
       </p>
       {txHash && (
         <a
