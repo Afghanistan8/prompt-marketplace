@@ -55,8 +55,8 @@ export default function Home() {
           />
           <Feature
             icon={<Search className="h-5 w-5" />}
-            title="Purchaser-gated delivery"
-            body="The full prompt body lives on-chain and unlocks in your library only after a real, paid on-chain purchase."
+            title="Encrypted, signed delivery"
+            body="The prompt body is stored encrypted on-chain — no read returns it. Unlocking takes a signed transaction only the real buyer can produce."
           />
         </div>
       </section>

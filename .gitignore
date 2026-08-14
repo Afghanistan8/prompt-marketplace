@@ -37,3 +37,10 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
+
+# gltest scratch (the genlayer pytest plugin creates this on every run)
+artifacts/
+
+# local tooling
+.claude/

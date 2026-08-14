@@ -7,7 +7,7 @@ import { WalletButton } from '../../components/WalletButton';
 import {
   getBuyerPurchases,
   getListing,
-  getPurchasedBody,
+  claimBody,
   formatGen,
   shortAddress,
   invalidateCache,
@@ -22,6 +22,8 @@ import {
   Copy,
   Check,
   Lock,
+  KeyRound,
+  AlertCircle,
 } from 'lucide-react';
 
 export default function Library() {
@@ -55,7 +57,6 @@ export default function Library() {
   function refresh() {
     invalidateCache('buyer_purchases');
     invalidateCache('listing:');
-    invalidateCache('purchased_body:');
     load();
   }
 
@@ -83,7 +84,8 @@ export default function Library() {
                 <h1 className="text-2xl font-semibold">My Library</h1>
               </div>
               <p className="text-sm text-zinc-500">
-                Prompts you own. Content is delivered from the Registry contract, gated by your on-chain purchase receipt.
+                Prompts you own. Bodies are encrypted on-chain; click Unlock on each one to sign a
+                small transaction that proves you are the seller or a real buyer and reveals it.
               </p>
             </div>
             {isConnected && (
@@ -156,64 +158,47 @@ export default function Library() {
   );
 }
 
+type UnlockStage = 'idle' | 'signing' | 'waiting' | 'unlocked' | 'finalizing' | 'error';
+
 function PurchaseCard({ listing, account }: { listing: Listing; account: `0x${string}` }) {
   const tags = listing.tags_csv ? listing.tags_csv.split(',').filter(Boolean) : [];
   const [body, setBody] = useState<string | null>(null);
-  const [bodyLoading, setBodyLoading] = useState(true);
-  const [bodyError, setBodyError] = useState<string | null>(null);
-  const [finalizing, setFinalizing] = useState(false);
+  const [stage, setStage] = useState<UnlockStage>('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
+  async function handleUnlock() {
     if (!listing.id) return;
-    const promptId = listing.id;
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let attempts = 0;
-    const MAX_ATTEMPTS = 24; // ~12 min at 30s while the buy finalizes
-
-    const attempt = () => {
-      setBodyLoading(true);
-      getPurchasedBody(promptId, account)
-        .then((b) => {
-          if (cancelled) return;
-          setBody(b);
-          setFinalizing(false);
-          setBodyError(null);
-          setBodyLoading(false);
-        })
-        .catch((e) => {
-          if (cancelled) return;
-          const raw = e instanceof Error ? e.message : String(e);
-          // Every card here is a prompt this wallet already bought (the id came
-          // from get_buyer_purchases, which reads the escrow's ACCEPTED-time
-          // state). A "not authorized" is therefore NOT a real access failure --
-          // it's the ACCEPTED -> FINALIZED window before the Registry receipt
-          // (emitted on='finalized') lands. Show a finalizing state and retry,
-          // rather than a misleading "reconnect your wallet" error.
-          if (/not authorized/i.test(raw)) {
-            setFinalizing(true);
-            setBodyError(null);
-            setBodyLoading(false);
-            if (attempts < MAX_ATTEMPTS) {
-              attempts += 1;
-              // The failed read isn't cached; just re-poll after a beat.
-              retryTimer = setTimeout(attempt, 30_000);
-            }
-          } else {
-            setFinalizing(false);
-            setBodyError('Could not load the prompt body. Try refreshing in a moment.');
-            setBodyLoading(false);
-          }
-        });
-    };
-    attempt();
-
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [listing.id, account]);
+    setErrorMsg(null);
+    try {
+      setStage('signing');
+      // claim_body is an authenticated WRITE: unlike the old free read, it
+      // requires a signed transaction (small gas cost), which is exactly
+      // what makes it unspoofable. waiting for consensus comes next.
+      setStage('waiting');
+      const b = await claimBody(listing.id, account);
+      setBody(b);
+      setStage('unlocked');
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      // This card only shows prompts get_buyer_purchases already reported
+      // as owned. A "not authorized" here means the Registry's purchase
+      // receipt (written when the buy finalizes) hasn't landed yet, not a
+      // real access failure. Unlike the old auto-retrying read, we don't
+      // silently resubmit -- that would mean signing a new transaction
+      // without the user asking for it. We surface it and let them retry.
+      if (/not authorized/i.test(raw)) {
+        setStage('finalizing');
+      } else {
+        setErrorMsg(
+          /user rejected|user denied/i.test(raw)
+            ? 'You cancelled the unlock transaction in your wallet.'
+            : 'Could not unlock the prompt. Try again in a moment.'
+        );
+        setStage('error');
+      }
+    }
+  }
 
   async function handleCopy() {
     if (!body) return;
@@ -257,9 +242,9 @@ function PurchaseCard({ listing, account }: { listing: Listing; account: `0x${st
       <div className="rounded-md border border-purple-500/30 bg-purple-500/5 p-4">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-[10px] uppercase tracking-wide text-purple-300">
-            Your prompt (unlocked)
+            {stage === 'unlocked' ? 'Your prompt (unlocked)' : 'Prompt body (encrypted on-chain)'}
           </p>
-          {body && !bodyLoading && !bodyError && (
+          {stage === 'unlocked' && body && (
             <button
               onClick={handleCopy}
               className="inline-flex items-center gap-1 rounded border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-[10px] text-purple-200 transition hover:bg-purple-500/20"
@@ -279,31 +264,60 @@ function PurchaseCard({ listing, account }: { listing: Listing; account: `0x${st
           )}
         </div>
 
-        {bodyLoading && (
+        {(stage === 'idle' || stage === 'error') && (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-zinc-500">
+              Sign a small transaction to prove you are the buyer and reveal the full body.
+            </p>
+            <button
+              onClick={handleUnlock}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-purple-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-purple-400"
+            >
+              <KeyRound className="h-3 w-3" />
+              Unlock
+            </button>
+          </div>
+        )}
+        {errorMsg && stage === 'error' && (
+          <div className="mt-2 flex items-start gap-2 text-xs text-red-400">
+            <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+        {(stage === 'signing' || stage === 'waiting') && (
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <Loader2 className="h-3 w-3 animate-spin" />
-            Fetching body from Registry contract...
+            {stage === 'signing'
+              ? 'Approve the unlock transaction in your wallet...'
+              : 'Verifying your purchase receipt on Bradbury (about 30-90s)...'}
           </div>
         )}
-        {finalizing && !bodyLoading && (
-          <div className="flex items-start gap-2 text-xs text-purple-300/90">
-            <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin" />
-            <span>
-              Purchase accepted — waiting for the Registry receipt to finalize on
-              Bradbury. The full prompt unlocks automatically once settlement is
-              final (usually a couple of minutes).
-            </span>
+        {stage === 'finalizing' && (
+          <div className="space-y-2">
+            <div className="flex items-start gap-2 text-xs text-purple-300/90">
+              <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin" />
+              <span>
+                Purchase accepted — waiting for the Registry receipt to finalize on
+                Bradbury. Phase 1 finalization can take a while (sometimes 10+
+                minutes); this isn&apos;t a failed purchase, just not settled yet.
+                Unlock again once it lands.
+              </span>
+            </div>
+            <button
+              onClick={handleUnlock}
+              className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs font-medium text-purple-200 transition hover:bg-purple-500/20"
+            >
+              <KeyRound className="h-3 w-3" />
+              Try unlocking again
+            </button>
           </div>
         )}
-        {bodyError && !bodyLoading && !finalizing && (
-          <p className="text-xs text-red-400">{bodyError}</p>
-        )}
-        {!bodyLoading && !finalizing && !bodyError && body && (
+        {stage === 'unlocked' && body && (
           <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-zinc-200">
             {body}
           </pre>
         )}
-        {!bodyLoading && !finalizing && !bodyError && !body && (
+        {stage === 'unlocked' && !body && (
           <p className="text-xs text-zinc-500">(empty body)</p>
         )}
       </div>

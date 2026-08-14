@@ -1,6 +1,6 @@
 'use client';
 
-import { createClient } from 'genlayer-js';
+import { createClient, abi } from 'genlayer-js';
 import { testnetBradbury } from 'genlayer-js/chains';
 import { CalldataAddress } from 'genlayer-js/types';
 import { REGISTRY_ADDRESS, ESCROW_ADDRESS } from './wagmi';
@@ -213,28 +213,95 @@ export async function getAllActive(limit = 50n): Promise<ActiveListing[]> {
   });
 }
 
-// v0.4: purchaser-gated content delivery.
-// The Registry's get_purchased_body verifies the caller (`from`) is the
-// seller or a recorded purchaser, so we MUST send the connected wallet as
-// `from`. A client bound to `account` puts that address on the underlying
-// gen_call; the ungated getBody is gone. Unauthorized callers get a thrown
-// Error ("gen_call failed: not authorized ..."), surfaced to the UI.
-export async function getPurchasedBody(
-  promptId: bigint,
-  account: `0x${string}`
-): Promise<string> {
-  return cached(`purchased_body:${account.toLowerCase()}:${promptId}`, async () => {
-    const client = walletClient(account);
-    const result = await client.readContract({
-      address: REGISTRY_ADDRESS,
-      functionName: 'get_purchased_body',
-      args: [promptId],
-    });
-    return String(result ?? '');
-  });
+// ---------- GenVM write-result decoding ----------
+//
+// A GenVM read's `from` is a caller-supplied, unauthenticated RPC param --
+// spoofable. A write's sender is derived from a real signature the wallet
+// produced over the transaction, so it can't be. v0.5 moves body delivery
+// from a read (get_purchased_body, removed) to a write (claim_body), which
+// closes that hole -- but it means the frontend has to pull the return
+// value back out of the settled transaction instead of just reading state.
+//
+// First attempt (verified wrong against live Bradbury, not just guessed):
+// genlayer-js's own `resultToUserFriendlyJson` decodes a result out of
+// `consensus_data.leader_receipt[].result`, but that field only gets
+// populated by `decodeLocalnetTransaction` -- which only runs for
+// `client.chain.isStudio`. Empirically dumping a real testnet
+// `client.getTransaction()` response (`node _tmp_inspect_tx.mjs` against a
+// live tx during debugging) shows `consensus_data` doesn't exist on it at
+// all on Bradbury; only `txExecutionResultName` / `resultName` do, with no
+// return payload.
+//
+// What actually carries the return value on live Bradbury is
+// `client.debugTraceTransaction({hash})` (`gen_dbg_traceTransaction` under
+// the hood) -- the same call the official `genlayer` CLI's `trace` command
+// uses. Verified directly: for a successful claim_body it returns
+// `{result_code: 0, return_data: <calldata-encoded map>}` where the decoded
+// map is `{kind: "Return", data: "<the plaintext body>", ...}`; for a
+// reverted one, `{result_code: 1, ...}` with `{kind: "UserError", data:
+// "not authorized: ..."}` -- same shape, `data` always the string that
+// matters. It's a "dbg"-prefixed RPC, so treat it as the best available
+// mechanism today rather than a guaranteed-stable public API; if GenLayer
+// ships a first-class result-retrieval method later, prefer that instead.
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.replace(/^0x/, '');
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+function decodeGenVMTrace(trace: { return_data?: string }): string {
+  if (!trace.return_data) {
+    throw new Error('claim_body trace had no return_data');
+  }
+  const decoded = abi.calldata.decode(hexToBytes(trace.return_data)) as
+    | Map<string, unknown>
+    | Record<string, unknown>;
+  const get = (key: string) =>
+    decoded instanceof Map ? decoded.get(key) : (decoded as Record<string, unknown>)[key];
+
+  const kind = get('kind');
+  const data = get('data');
+  const message = typeof data === 'string' ? data : String(data ?? '');
+
+  if (kind === 'Return') return message;
+  throw new Error(message || `claim_body failed (${String(kind)})`);
 }
 
 // ---------- REGISTRY writes ----------
+
+// v0.5: purchaser-gated content delivery via an authenticated write.
+// claim_body(prompt_id) verifies the connected wallet is the seller or a
+// recorded purchaser using GenVM's real, signature-derived sender -- unlike
+// the removed get_purchased_body read, this cannot be bypassed by spoofing
+// `from`. The plaintext body comes back as the write's own return value,
+// read back via debugTraceTransaction (see decodeGenVMTrace above).
+// Unauthorized callers get a UserError, surfaced as a thrown Error whose
+// message contains "not authorized".
+export async function claimBody(
+  promptId: bigint,
+  account: `0x${string}`
+): Promise<string> {
+  const client = walletClient(account);
+  const hash = (await client.writeContract({
+    address: REGISTRY_ADDRESS,
+    functionName: 'claim_body',
+    args: [promptId],
+    value: 0n,
+  } as any)) as string;
+
+  await (client as any).waitForTransactionReceipt({
+    hash,
+    status: 'ACCEPTED',
+    interval: 5_000,
+    retries: 60,
+  });
+
+  const trace = await (client as any).debugTraceTransaction({ hash });
+  return decodeGenVMTrace(trace);
+}
 
 export interface ListPromptArgs {
   title: string;

@@ -74,7 +74,7 @@ export default function HowItWorks() {
               num="03"
               icon={<ShoppingBag className="h-5 w-5 text-purple-400" />}
               title="Buyer pays, prompt unlocks"
-              body="A buyer calls PromptEscrow.buy(prompt_id) with the GEN price attached. Escrow verifies the listing against the Registry, pays the seller immediately, holds a 2.5% fee, and writes a purchase receipt that unlocks the full prompt body from the Registry."
+              body="A buyer calls PromptEscrow.buy(prompt_id) with the GEN price attached. Escrow verifies the listing against the Registry, pays the seller immediately, holds a 2.5% fee, and writes a purchase receipt. The buyer then signs one more small transaction — claim_body — which decrypts and returns the prompt only to them."
             />
           </div>
         </div>
@@ -105,8 +105,8 @@ export default function HowItWorks() {
             />
             <Feature
               icon={<Layers className="h-5 w-5 text-purple-400" />}
-              title="Purchaser-gated content delivery"
-              body="Settlement writes a purchase receipt into the Registry. get_purchased_body(prompt_id) returns the full prompt only to the seller or a wallet holding that receipt — every other caller is rejected. The prompt itself lives on-chain and is gated by the contract, not a backend."
+              title="Encrypted body, authenticated delivery"
+              body="The prompt body is encrypted before it's ever written to state — no view function returns plaintext, so a spoofed read can't extract it. Delivery is a signed write, claim_body(prompt_id): GenVM authenticates the caller from the transaction signature itself, then decrypts and returns the body only to the seller or a wallet with a real purchase receipt."
             />
           </div>
         </div>
@@ -124,12 +124,12 @@ export default function HowItWorks() {
               title="PromptRegistry"
               address={REGISTRY_ADDRESS}
               role="The listings + content contract"
-              description="Holds canonical metadata for every prompt plus the full prompt body on-chain: seller, title, description, price, LLM-assigned category, and deterministically-extracted tags. Runs LLM consensus for duplicate detection and categorization on every list_prompt, and delivers the body only to verified purchasers."
+              description="Holds canonical metadata for every prompt plus the prompt body, encrypted, on-chain: seller, title, description, price, LLM-assigned category, and deterministically-extracted tags. Runs LLM consensus for duplicate detection and categorization on every list_prompt. The body is decrypted only inside claim_body, a signed write, for the seller or a verified purchaser — never by any read."
               methods={[
-                'list_prompt(title, description, target_models, price, ipfs_cid, body_hash, preview, body) — submit a new listing',
-                'get_listing(id) — read a single prompt',
+                'list_prompt(title, description, target_models, price, ipfs_cid, body_hash, preview, body) — submit a new listing; body is encrypted before it touches state',
+                'get_listing(id) — read a single prompt (never includes the body)',
                 'get_all_active(limit) — paginated active listings',
-                'get_purchased_body(id) — gated: full body for seller or purchaser only',
+                'claim_body(id) — write, signed by the caller: decrypts and returns the body for the seller or a purchaser only',
                 'record_purchase(buyer_hex, id) — escrow-only: writes receipt + increments sales',
                 'deactivate / reactivate(id) — seller controls',
               ]}

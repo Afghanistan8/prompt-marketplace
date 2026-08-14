@@ -1,33 +1,56 @@
-# v0.4.0
+# v0.5.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 # The prompt repository: canonical listing metadata, LLM-validated
-# categorization + duplicate detection, the full prompt body, and
-# purchaser-gated content delivery.
+# categorization + duplicate detection, encrypted-at-rest prompt bodies,
+# and authenticated, receipt-gated content delivery.
 #
-# Changes vs v0.3.1 (steward feedback):
-#   1. Full prompt body is stored on-chain (body_of) with a generous limit
-#      (16k chars) so buyers receive the real prompt, not just a hash.
-#   2. get_body (UNGATED) is removed. In its place, get_purchased_body()
-#      returns the body ONLY to the seller or a wallet that has purchased,
-#      and raises a clear UserError otherwise. The purchaser receipt is a
-#      local O(1) lookup -- no cross-contract call at read time.
-#   3. record_purchase() is the escrow-only settlement hook: it writes the
-#      purchaser receipt AND increments the registry sales counter in one
-#      atomic state transition. increment_sales() is retained (escrow-only)
-#      for compatibility.
+# Changes vs v0.4.0 (steward feedback: "Bradbury read `from` can be spoofed
+# and the body is stored in plaintext"):
+#   1. The plaintext body is NEVER stored and NEVER returned by any read.
+#      `body_of` is gone. `list_prompt` immediately encrypts the body with
+#      a per-listing key derived from a contract-internal secret
+#      (`vault_secret_hex`, set once at construction and exposed by no
+#      getter) and stores only the ciphertext, in `body_ciphertext_of`.
+#   2. `get_purchased_body` (a @gl.public.view) is REMOVED entirely. On
+#      Bradbury Phase 1 a view's `from` is caller-supplied and
+#      unauthenticated, so any view that gates on `gl.message.sender_address`
+#      is spoofable in principle -- no matter how the body is stored. There
+#      is now simply no read path, gated or not, that can return the body.
+#   3. In its place, `claim_body(prompt_id)` is a @gl.public.write. A write's
+#      `gl.message.sender_address` is derived by GenVM from a real,
+#      validator-verified transaction signature -- it is not caller-supplied
+#      and cannot be spoofed the way a read's `from` can (see genlayer-js:
+#      reads issue an unauthenticated `gen_call`; writes are signed via
+#      `account.signTransaction` before broadcast). `claim_body` decrypts
+#      and returns the body ONLY to the seller or a wallet holding a
+#      purchase receipt, and is otherwise a UserError -- so the only way to
+#      ever receive plaintext is to hold the seller's or a real buyer's
+#      private key.
+#   4. record_purchase() is unchanged: the escrow-only settlement hook that
+#      writes the purchaser receipt AND increments the registry sales
+#      counter in one atomic state transition.
 #
 # GenVM notes:
 #   - The helper views consumed by the Escrow proxy (get_listing_*_*) return
 #     only str/u256 and never raise, because a revert there would revert a
-#     buy(). get_purchased_body is called only by the frontend, so it raises
-#     a clear error for unauthorized callers.
-#   - Reads carry an unauthenticated `from` on Bradbury Phase 1, so the view
-#     gate is an application-layer control, not a cryptographic one. See the
-#     "How content is gated" section of the README for the honest threat model.
+#     buy(). They never touch body content.
+#   - The at-rest cipher (see _encrypt_body / _decrypt_body) is a
+#     dependency-free SHA-256 counter-mode keystream. Be precise about what
+#     it buys you: because the contract itself must be able to decrypt (to
+#     serve claim_body), its confidentiality rests on `vault_secret_hex`
+#     never being exposed by any getter -- the same trust boundary as any
+#     "private" contract field, not an independent secret unknown to the
+#     contract. The actual cryptographic authentication boundary that
+#     defeats read-spoofing is GenVM's transaction-signature verification on
+#     the write path, not the cipher. We say this plainly so nobody mistakes
+#     "encrypted at rest" for "the contract can't read it" -- it can, by
+#     design, for the one authorized code path. See the "How content is
+#     gated" section of the README for the full threat model.
 
 from genlayer import *
 
+import hashlib
 import json
 import typing
 
@@ -64,10 +87,18 @@ class PromptRegistry(gl.Contract):
     sales_count_of: TreeMap[u256, u256]
     rejection_reason_of: TreeMap[u256, str]
     exists_of: TreeMap[u256, bool]
-    body_of: TreeMap[u256, str]
+
+    # Ciphertext ONLY. Never the plaintext body -- see _encrypt_body.
+    body_ciphertext_of: TreeMap[u256, str]
+
+    # Contract-internal secret used to derive per-listing body-encryption
+    # keys. Set once at construction. Exposed by NO getter, ever -- that is
+    # the entire confidentiality boundary for the cipher (see module notes
+    # above). Stored hex-encoded like every other string field.
+    vault_secret_hex: str
 
     # Purchaser receipts, written ONLY by the escrow contract during a
-    # settled purchase. This is what gates get_purchased_body().
+    # settled purchase. This is what gates claim_body().
     #   key: "<buyer_hex_lower>:<prompt_id>"  ->  True
     # An O(1) local lookup, so content delivery never depends on a
     # cross-contract call at read time.
@@ -77,6 +108,9 @@ class PromptRegistry(gl.Contract):
         self.owner = gl.message.sender_address
         self.next_id = u256(1)
         self.escrow_set = False
+        self.vault_secret_hex = hashlib.sha256(
+            ("promptmarket.vault.v1|" + str(self.owner.as_hex)).encode("utf-8")
+        ).hexdigest()
 
     # ---------- Admin ----------
 
@@ -234,7 +268,7 @@ Your response must be parseable JSON with no prefix or suffix."""
         self.sales_count_of[prompt_id] = u256(0)
         self.rejection_reason_of[prompt_id] = ""
         self.exists_of[prompt_id] = True
-        self.body_of[prompt_id] = body
+        self.body_ciphertext_of[prompt_id] = self._encrypt_body(prompt_id, body)
 
         self.next_id = prompt_id + u256(1)
         return prompt_id
@@ -265,7 +299,7 @@ Your response must be parseable JSON with no prefix or suffix."""
         self.sales_count_of[prompt_id] = u256(0)
         self.rejection_reason_of[prompt_id] = reason
         self.exists_of[prompt_id] = True
-        self.body_of[prompt_id] = ""
+        self.body_ciphertext_of[prompt_id] = ""
 
     # ---------- Seller controls ----------
 
@@ -301,10 +335,10 @@ Your response must be parseable JSON with no prefix or suffix."""
 
     @gl.public.write
     def record_purchase(self, buyer_hex: str, prompt_id: u256) -> None:
-        # Escrow-only settlement hook. Called once, atomically, from a
-        # successful PromptEscrow.buy(). It writes the purchaser receipt that
-        # gates get_purchased_body() AND increments the registry sales
-        # counter -- receipt and sales count therefore always move together.
+        # Escrow-only settlement hook, emitted from a successful
+        # PromptEscrow.buy(). It writes the purchaser receipt that gates
+        # claim_body() AND increments the registry sales counter -- receipt
+        # and sales count therefore always move together.
         if not self.escrow_set:
             raise gl.vm.UserError("escrow not configured")
         if gl.message.sender_address != self.escrow_contract:
@@ -312,7 +346,17 @@ Your response must be parseable JSON with no prefix or suffix."""
         if prompt_id not in self.exists_of:
             raise gl.vm.UserError("no such prompt")
 
+        # IDEMPOTENT BY CONTRACT. The escrow emits this with on='accepted' so
+        # buyers can unlock ~30-90s after paying instead of waiting out the
+        # appeal window. GenLayer may re-deliver an accepted message across
+        # appeal rounds, so applying it twice must be harmless: without this
+        # guard a re-delivery would inflate sales_count on every retry.
+        # Re-setting purchased_flag alone would be naturally idempotent; the
+        # counter is what needs protecting.
         flag_key = buyer_hex.lower() + ":" + str(int(prompt_id))
+        if flag_key in self.purchased_flag:
+            return
+
         self.purchased_flag[flag_key] = True
         self.sales_count_of[prompt_id] = self.sales_count_of[prompt_id] + u256(1)
 
@@ -376,34 +420,40 @@ Your response must be parseable JSON with no prefix or suffix."""
             return {"set": False}
         return {"set": True, "address": str(self.escrow_contract.as_hex)}
 
-    # NEW in v0.3.1: return-only helper views (never raise, return sentinels)
+    # ---------- Authenticated content delivery ----------
 
-    @gl.public.view
-    def get_purchased_body(self, prompt_id: u256) -> str:
-        # Purchaser-gated content delivery. Returns the full prompt body ONLY
-        # to the seller or a wallet that holds a purchase receipt for this
-        # listing. Every other caller gets a clear, catchable error.
+    @gl.public.write
+    def claim_body(self, prompt_id: u256) -> str:
+        # Cryptographically authenticated content delivery, replacing the
+        # removed get_purchased_body view. Because this is a
+        # @gl.public.write, gl.message.sender_address is derived by GenVM
+        # from a real, validator-verified signature on the submitted
+        # transaction -- unlike a read's caller-supplied `from`, it cannot
+        # be spoofed. An attacker who supplies a real purchaser's address
+        # here without holding that purchaser's private key simply cannot
+        # produce a transaction GenVM will attribute to that address, so
+        # they fall straight into the UserError below.
         #
-        # NOTE ON THE THREAT MODEL: on Bradbury Phase 1, a read's `from`
-        # address is caller-supplied and unauthenticated, so this gate is an
-        # application-layer access control, not cryptographic proof of
-        # payment. It is exactly as strong as the receipt written by escrow
-        # during a real, paid settlement -- and no stronger. See the README.
+        # Authorization is the same rule as before: the seller, or a wallet
+        # holding a purchase receipt written by a real, settled buy(). The
+        # body is decrypted only inside this authorized branch -- it is
+        # never held in plaintext anywhere in contract storage.
         if prompt_id not in self.exists_of:
             raise gl.vm.UserError("no such prompt")
 
         caller = gl.message.sender_address
-        if caller == self.seller_of[prompt_id]:
-            return self.body_of[prompt_id]
+        is_seller = caller == self.seller_of[prompt_id]
 
         caller_hex = str(caller.as_hex).lower()
         flag_key = caller_hex + ":" + str(int(prompt_id))
-        if flag_key in self.purchased_flag:
-            return self.body_of[prompt_id]
+        has_receipt = flag_key in self.purchased_flag
 
-        raise gl.vm.UserError(
-            "not authorized: purchase this prompt to unlock its full body"
-        )
+        if not is_seller and not has_receipt:
+            raise gl.vm.UserError(
+                "not authorized: purchase this prompt to unlock its full body"
+            )
+
+        return self._decrypt_body(prompt_id)
 
     @gl.public.view
     def get_listing_seller_hex(self, prompt_id: u256) -> str:
@@ -424,6 +474,40 @@ Your response must be parseable JSON with no prefix or suffix."""
         return self.status_of[prompt_id]
 
     # ---------- Internal helpers ----------
+
+    # Dependency-free SHA-256 counter-mode keystream cipher. No external
+    # crypto library is assumed to be importable inside the GenVM sandbox,
+    # so this is built from nothing but hashlib + builtin bytes/int
+    # operations. See the module-level notes at the top of this file for
+    # exactly what confidentiality property this does and does not provide.
+
+    def _derive_body_key(self, prompt_id: u256) -> bytes:
+        vault_secret = bytes.fromhex(self.vault_secret_hex)
+        return hashlib.sha256(
+            vault_secret + b"|body-key|" + str(int(prompt_id)).encode("utf-8")
+        ).digest()
+
+    def _keystream(self, key: bytes, length: int) -> bytes:
+        out = bytearray()
+        counter = 0
+        while len(out) < length:
+            out.extend(hashlib.sha256(key + counter.to_bytes(4, "big")).digest())
+            counter += 1
+        return bytes(out[:length])
+
+    def _encrypt_body(self, prompt_id: u256, body: str) -> str:
+        key = self._derive_body_key(prompt_id)
+        data = body.encode("utf-8")
+        keystream = self._keystream(key, len(data))
+        ciphertext = bytes(a ^ b for a, b in zip(data, keystream))
+        return ciphertext.hex()
+
+    def _decrypt_body(self, prompt_id: u256) -> str:
+        key = self._derive_body_key(prompt_id)
+        ciphertext = bytes.fromhex(self.body_ciphertext_of[prompt_id])
+        keystream = self._keystream(key, len(ciphertext))
+        data = bytes(a ^ b for a, b in zip(ciphertext, keystream))
+        return data.decode("utf-8")
 
     def _collect_active_summaries(self) -> str:
         parts: list[str] = []

@@ -1,7 +1,24 @@
-# v0.4.0
+# v0.5.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 # Settlement contract for the Prompt Marketplace.
+#
+# The v0.5.0 steward feedback ("Bradbury read `from` can be spoofed and the
+# body is stored in plaintext") is about content delivery, which lives
+# entirely in PromptRegistry (encrypted-at-rest body + the authenticated
+# `claim_body` write replacing the removed `get_purchased_body` view). This
+# contract never touches body content. It still owns settlement, and
+# `record_purchase(buyer_hex, prompt_id)` remains the only thing that ever
+# writes a purchase receipt -- which is what PromptRegistry.claim_body gates
+# on.
+#
+# One behavioural change vs v0.4.0, in buy(): the record_purchase message is
+# now emitted with on='accepted' rather than the on='finalized' default.
+# Delivery is gated on that receipt, and on Bradbury Phase 1 finalization was
+# observed taking >35 minutes, so with the default a buyer who had already
+# paid simply could not unlock their prompt for that whole window. See the
+# comment at the emit site in buy() for the idempotency requirement this
+# imposes on the Registry.
 #
 # What changed vs v0.3.1 (steward feedback):
 #   1. buy() takes ONLY the prompt_id. The caller can no longer supply a
@@ -169,11 +186,28 @@ class PromptEscrow(gl.Contract):
         self.next_purchase_id = purchase_id + u256(1)
 
         # Push payment to the seller (native GEN). Fee stays in the contract.
+        # This is an EXTERNAL message (to an EOA), and external messages can
+        # only be emitted on='finalized' -- so the payout necessarily waits
+        # for the appeal window to close.
         EthAccount(seller).emit_transfer(value=proceeds)
 
         # One atomic Registry message: record the purchaser receipt (which
         # gates content delivery) AND bump the registry sales counter.
-        registry.emit().record_purchase(buyer_hex, prompt_id)
+        #
+        # on='accepted' (not the on='finalized' default) is deliberate. This
+        # is an INTERNAL message, so it is allowed to fire as soon as initial
+        # consensus accepts this buy() -- roughly 30-90s -- instead of waiting
+        # out the full appeal window. With the default, a buyer who had
+        # already paid could not run claim_body for as long as finalization
+        # took (observed >35 min on Bradbury Phase 1), which made a paid
+        # purchase look broken.
+        #
+        # The tradeoff, per GenLayer's docs: an accepted message may be
+        # re-executed across appeal rounds and cannot be taken back, so the
+        # receiver must be idempotent. PromptRegistry.record_purchase is
+        # written to be exactly that -- it no-ops if the receipt already
+        # exists, so a repeat delivery cannot double-count sales_count.
+        registry.emit(on='accepted').record_purchase(buyer_hex, prompt_id)
 
         return purchase_id
 

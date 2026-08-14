@@ -126,7 +126,6 @@ export function BuyConfirmModal({ open, listing, onClose, onSuccess }: Props) {
       invalidateCache('escrow_stats');
       invalidateCache('all_active');
       invalidateCache('listing:');
-      invalidateCache('purchased_body:');
       onSuccess();
     } catch (e) {
       console.error('[Buy] error:', e);
