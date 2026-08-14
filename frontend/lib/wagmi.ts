@@ -1,8 +1,14 @@
-'use client';
-
 // Contract constants. (Historically this file configured wagmi/RainbowKit; the
 // wallet layer is now a custom EIP-6963 provider in lib/wallet.tsx, so only the
 // contract addresses live here. Filename kept to avoid churn in importers.)
+//
+// Deliberately NOT 'use client'. These are plain strings with no hooks or
+// browser APIs, and app/how-it-works/page.tsx is a server component that
+// renders them. Importing a non-component value from a 'use client' module
+// hands a server component a client *reference* (a function proxy) rather
+// than the value, which is why that page used to print "function()…" where
+// the contract addresses belong. Keeping this module boundary-free lets both
+// server and client components import the real strings.
 
 // v0.5.0 contracts (GenLayer Bradbury Testnet, chain id 4221). Deployed
 // 2026-08-15; PromptRegistry.set_escrow_contract(ESCROW_ADDRESS) confirmed
